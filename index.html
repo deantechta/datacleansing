@@ -3,6 +3,9 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <meta http-equiv="Pragma" content="no-cache" />
+  <meta http-equiv="Expires" content="0" />
   <title>Excel Column Picker</title>
   <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js" crossorigin="anonymous"></script>
   <style>
@@ -709,6 +712,7 @@
     <div class="btn-row">
       <button class="btn btn-secondary" id="btnCopyBack">← 이전</button>
       <button class="btn btn-success" id="btnCopy">📋 클립보드에 복사</button>
+      <button class="btn btn-secondary" id="btnNewTask">🔄 새 작업 시작</button>
     </div>
   </div>
 
@@ -740,7 +744,8 @@
   }
 
   function getColumnsFromSheet(sheet, headerRow) {
-    const range = XLSX.utils.decode_range(sheet['!ref'] || 'A1:A1');
+    if (!sheet || !sheet['!ref']) return [];
+    const range = XLSX.utils.decode_range(sheet['!ref']);
     const cols = [];
     const row = headerRow - 1; // 0-indexed
     if (row < range.s.r || row > range.e.r) return cols;
@@ -753,7 +758,8 @@
   }
 
   function getSheetPreview(sheet, maxRows) {
-    const range = XLSX.utils.decode_range(sheet['!ref'] || 'A1:A1');
+    if (!sheet || !sheet['!ref']) return { rows: [], totalRows: 0, totalCols: 0, shownCols: 0 };
+    const range = XLSX.utils.decode_range(sheet['!ref']);
     const rows = [];
     const maxCols = Math.min(range.e.c - range.s.c + 1, 10); // cap at 10 columns
     const rowCount = Math.min(range.e.r - range.s.r + 1, maxRows);
@@ -771,7 +777,8 @@
   }
 
   function getColumnPreview(sheet, headerRow, colLetter) {
-    const range = XLSX.utils.decode_range(sheet['!ref'] || 'A1:A1');
+    if (!sheet || !sheet['!ref']) return [];
+    const range = XLSX.utils.decode_range(sheet['!ref']);
     const values = [];
     // Convert letter to column index
     let colIdx = 0;
@@ -799,6 +806,85 @@
     const e = document.createElement(tag);
     if (className) e.className = className;
     return e;
+  }
+
+  // Build a preview toggle + table for a sheet (reused in Step 2 and Step 3)
+  function buildSheetPreviewToggle(sheetInfo) {
+    const toggleBtn = el('button', 'sheet-preview-toggle');
+    toggleBtn.textContent = '미리보기 ▼';
+    const previewWrap = el('div', 'sheet-preview-wrap');
+
+    toggleBtn.addEventListener('click', () => {
+      const isVisible = previewWrap.classList.contains('visible');
+      if (isVisible) {
+        previewWrap.classList.remove('visible');
+        toggleBtn.textContent = '미리보기 ▼';
+      } else {
+        if (!previewWrap._built) {
+          const { fileIdx, sheetName } = sheetInfo;
+          const fileData = state.files[fileIdx];
+          if (!fileData || !fileData.workbook) {
+            const errMsg = el('div');
+            errMsg.style.cssText = 'font-size:0.78rem;color:#f87171;padding:8px 0;';
+            errMsg.textContent = '시트 데이터를 불러올 수 없습니다.';
+            previewWrap.appendChild(errMsg);
+            previewWrap._built = true;
+            previewWrap.classList.add('visible');
+            toggleBtn.textContent = '미리보기 ▲';
+            return;
+          }
+          const sheet = fileData.workbook.Sheets[sheetName];
+          if (!sheet || !sheet['!ref']) {
+            const emptyMsg = el('div');
+            emptyMsg.style.cssText = 'font-size:0.78rem;color:var(--text-muted);padding:8px 0;';
+            emptyMsg.textContent = '데이터가 없습니다.';
+            previewWrap.appendChild(emptyMsg);
+            previewWrap._built = true;
+            previewWrap.classList.add('visible');
+            toggleBtn.textContent = '미리보기 ▲';
+            return;
+          }
+          const { rows, totalRows, totalCols, shownCols } = getSheetPreview(sheet, 5);
+
+          if (rows.length === 0) {
+            const emptyMsg = el('div');
+            emptyMsg.style.cssText = 'font-size:0.78rem;color:var(--text-muted);padding:8px 0;';
+            emptyMsg.textContent = '데이터가 없습니다.';
+            previewWrap.appendChild(emptyMsg);
+          } else {
+            const table = el('table', 'sheet-preview-table');
+            rows.forEach((row, rIdx) => {
+              const tr = el('tr');
+              const th = el('td', 'row-num');
+              th.textContent = rIdx + 1;
+              tr.appendChild(th);
+              row.forEach(val => {
+                const td = el('td');
+                td.textContent = val || '';
+                td.title = val || '';
+                tr.appendChild(td);
+              });
+              table.appendChild(tr);
+            });
+            previewWrap.appendChild(table);
+
+            const parts = [];
+            if (totalRows > 5) parts.push(`${totalRows}행 중 5행만 표시`);
+            if (totalCols > shownCols) parts.push(`${totalCols}열 중 ${shownCols}열만 표시`);
+            if (parts.length > 0) {
+              const info = el('div', 'sheet-preview-overflow');
+              info.textContent = parts.join(' · ');
+              previewWrap.appendChild(info);
+            }
+          }
+          previewWrap._built = true;
+        }
+        previewWrap.classList.add('visible');
+        toggleBtn.textContent = '미리보기 ▲';
+      }
+    });
+
+    return { toggleBtn, previewWrap };
   }
 
   function showSection(id) {
@@ -884,6 +970,8 @@
   }
 
   function resetAll() {
+    // Explicitly release workbook references for GC
+    state.files.forEach(f => { f.workbook = null; });
     Object.assign(state, {
       files: [],
       allSheets: [],
@@ -894,7 +982,11 @@
     document.getElementById('sheetGroups').innerHTML = '';
     document.getElementById('headerRowList').innerHTML = '';
     document.getElementById('colSections').innerHTML = '';
+    const previewBox = document.getElementById('previewBox');
+    previewBox.innerHTML = '';
+    previewBox._copyText = null;
     document.getElementById('fileInput').value = '';
+    showUploadError('');
     showSection('sec-upload');
     updateStepIndicator(1);
   }
@@ -1053,63 +1145,8 @@
           document.getElementById('btnSheetNext').disabled = state.selectedKeys.length === 0;
         });
 
-        const toggleBtn = el('button', 'sheet-preview-toggle');
-        toggleBtn.textContent = '미리보기 ▼';
-
+        const { toggleBtn, previewWrap } = buildSheetPreviewToggle(sheetInfo);
         chipRow.append(chip, toggleBtn);
-
-        const previewWrap = el('div', 'sheet-preview-wrap');
-
-        toggleBtn.addEventListener('click', () => {
-          const isVisible = previewWrap.classList.contains('visible');
-          if (isVisible) {
-            previewWrap.classList.remove('visible');
-            toggleBtn.textContent = '미리보기 ▼';
-          } else {
-            // Build preview table on first open
-            if (!previewWrap._built) {
-              const { fileIdx, sheetName } = sheetInfo;
-              const sheet = state.files[fileIdx].workbook.Sheets[sheetName];
-              const { rows, totalRows, totalCols, shownCols } = getSheetPreview(sheet, 5);
-
-              if (rows.length === 0) {
-                const emptyMsg = el('div');
-                emptyMsg.style.cssText = 'font-size:0.78rem;color:var(--text-muted);padding:8px 0;';
-                emptyMsg.textContent = '데이터가 없습니다.';
-                previewWrap.appendChild(emptyMsg);
-              } else {
-                const table = el('table', 'sheet-preview-table');
-                rows.forEach((row, rIdx) => {
-                  const tr = el('tr');
-                  const th = el('td', 'row-num');
-                  th.textContent = rIdx + 1;
-                  tr.appendChild(th);
-                  row.forEach(val => {
-                    const td = el('td');
-                    td.textContent = val || '';
-                    td.title = val || '';
-                    tr.appendChild(td);
-                  });
-                  table.appendChild(tr);
-                });
-                previewWrap.appendChild(table);
-
-                // Overflow info
-                const parts = [];
-                if (totalRows > 5) parts.push(`${totalRows}행 중 5행만 표시`);
-                if (totalCols > shownCols) parts.push(`${totalCols}열 중 ${shownCols}열만 표시`);
-                if (parts.length > 0) {
-                  const info = el('div', 'sheet-preview-overflow');
-                  info.textContent = parts.join(' · ');
-                  previewWrap.appendChild(info);
-                }
-              }
-              previewWrap._built = true;
-            }
-            previewWrap.classList.add('visible');
-            toggleBtn.textContent = '미리보기 ▲';
-          }
-        });
 
         sheetWrap.append(chipRow, previewWrap);
         groupEl.appendChild(sheetWrap);
@@ -1148,10 +1185,19 @@
 
       const item = el('div', 'header-row-item');
 
+      const topRow = el('div');
+      topRow.style.cssText = 'display:flex;align-items:center;justify-content:space-between;width:100%;';
+
+      const leftPart = el('div');
+      leftPart.style.cssText = 'display:flex;align-items:center;gap:10px;';
+
       const nameEl = el('div', 'sheet-name');
       nameEl.textContent = '📄 ' + (multiFile
         ? `${sheetInfo.fileName} / ${sheetInfo.sheetName}`
         : sheetInfo.sheetName);
+
+      const { toggleBtn, previewWrap } = buildSheetPreviewToggle(sheetInfo);
+      leftPart.append(nameEl, toggleBtn);
 
       const wrap = el('div', 'row-input-wrap');
       const labelBefore = el('span');
@@ -1166,7 +1212,9 @@
       labelAfter.textContent = '행';
       wrap.append(labelBefore, input, labelAfter);
 
-      item.append(nameEl, wrap);
+      topRow.append(leftPart, wrap);
+
+      item.append(topRow, previewWrap);
       list.appendChild(item);
     });
   }
@@ -1436,6 +1484,8 @@
       showToast('✓ 클립보드에 복사되었습니다!');
     }
   });
+
+  document.getElementById('btnNewTask').addEventListener('click', resetAll);
 
 </script>
 </body>
