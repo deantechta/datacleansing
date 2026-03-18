@@ -540,6 +540,64 @@
       opacity: 0.7;
     }
 
+    /* SHEET PREVIEW TABLE */
+    .sheet-preview-wrap {
+      margin-top: 12px;
+      display: none;
+    }
+    .sheet-preview-wrap.visible { display: block; }
+    .sheet-preview-toggle {
+      font-size: 0.78rem;
+      color: var(--accent);
+      cursor: pointer;
+      background: none;
+      border: none;
+      padding: 4px 0;
+      margin-top: 6px;
+    }
+    .sheet-preview-toggle:hover { text-decoration: underline; }
+    .sheet-preview-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.75rem;
+      margin-top: 8px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      overflow: hidden;
+    }
+    .sheet-preview-table th,
+    .sheet-preview-table td {
+      padding: 6px 10px;
+      border: 1px solid var(--border);
+      text-align: left;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 160px;
+    }
+    .sheet-preview-table th {
+      background: var(--surface2);
+      color: var(--accent);
+      font-weight: 600;
+    }
+    .sheet-preview-table td {
+      color: var(--text-muted);
+    }
+    .sheet-preview-table .row-num {
+      color: var(--text-muted);
+      opacity: 0.5;
+      font-size: 0.7rem;
+      text-align: center;
+      width: 30px;
+    }
+    .sheet-preview-overflow {
+      font-size: 0.72rem;
+      color: var(--text-muted);
+      margin-top: 4px;
+      font-style: italic;
+    }
+
     /* DOWNLOAD BUTTON */
     .btn-download {
       background: var(--surface2);
@@ -649,18 +707,17 @@
     <div class="card-title">내보내기</div>
     <div class="card-desc">출력 형식을 선택한 뒤, 클립보드에 복사하거나 파일로 다운로드하세요.</div>
     <div class="format-options">
-      <span class="format-group-title">구분자</span>
+      <span class="format-group-title">클립보드 구분자</span>
       <label><input type="radio" name="fmt" value="tab" checked /> 탭 (Excel 붙여넣기)</label>
       <label><input type="radio" name="fmt" value="csv" /> 쉼표 (CSV)</label>
       <label><input type="radio" name="fmt" value="newline" /> 줄바꿈만</label>
-      <label><input type="radio" name="fmt" value="xlsx" /> Excel (.xlsx)</label>
       <div class="format-divider"></div>
       <label><input type="checkbox" id="fmtHeader" checked /> 헤더(컬럼명) 포함</label>
     </div>
     <div class="preview-box" id="previewBox"></div>
     <div class="btn-row">
       <button class="btn btn-secondary" id="btnCopyBack">← 이전</button>
-      <button class="btn btn-download" id="btnDownload">↓ 파일 다운로드</button>
+      <button class="btn btn-download" id="btnDownload">↓ Excel 다운로드</button>
       <button class="btn btn-success" id="btnCopy">📋 클립보드에 복사</button>
     </div>
   </div>
@@ -703,6 +760,24 @@
       cols.push({ letter: colIndexToLetter(c), name: String(cell.v).trim() });
     }
     return cols;
+  }
+
+  function getSheetPreview(sheet, maxRows) {
+    const range = XLSX.utils.decode_range(sheet['!ref'] || 'A1:A1');
+    const rows = [];
+    const maxCols = Math.min(range.e.c - range.s.c + 1, 10); // cap at 10 columns
+    const rowCount = Math.min(range.e.r - range.s.r + 1, maxRows);
+    const totalRows = range.e.r - range.s.r + 1;
+    const totalCols = range.e.c - range.s.c + 1;
+    for (let r = range.s.r; r < range.s.r + rowCount; r++) {
+      const row = [];
+      for (let c = range.s.c; c < range.s.c + maxCols; c++) {
+        const cell = sheet[XLSX.utils.encode_cell({ r, c })];
+        row.push(cell && cell.v !== undefined && cell.v !== null ? String(cell.v).trim() : '');
+      }
+      rows.push(row);
+    }
+    return { rows, totalRows, totalCols, shownCols: maxCols };
   }
 
   function getColumnPreview(sheet, headerRow, colLetter) {
@@ -969,8 +1044,13 @@
         groupEl.appendChild(title);
       }
 
-      const grid = el('div', 'sheet-grid');
       group.sheets.forEach(sheetInfo => {
+        const sheetWrap = el('div');
+        sheetWrap.style.cssText = 'margin-bottom:12px;';
+
+        const chipRow = el('div');
+        chipRow.style.cssText = 'display:flex;align-items:center;gap:10px;';
+
         const chip = el('div', 'sheet-chip');
         chip.textContent = sheetInfo.sheetName;
         chip.addEventListener('click', () => {
@@ -982,10 +1062,69 @@
           }
           document.getElementById('btnSheetNext').disabled = state.selectedKeys.length === 0;
         });
-        grid.appendChild(chip);
+
+        const toggleBtn = el('button', 'sheet-preview-toggle');
+        toggleBtn.textContent = '미리보기 ▼';
+
+        chipRow.append(chip, toggleBtn);
+
+        const previewWrap = el('div', 'sheet-preview-wrap');
+
+        toggleBtn.addEventListener('click', () => {
+          const isVisible = previewWrap.classList.contains('visible');
+          if (isVisible) {
+            previewWrap.classList.remove('visible');
+            toggleBtn.textContent = '미리보기 ▼';
+          } else {
+            // Build preview table on first open
+            if (!previewWrap._built) {
+              const { fileIdx, sheetName } = sheetInfo;
+              const sheet = state.files[fileIdx].workbook.Sheets[sheetName];
+              const { rows, totalRows, totalCols, shownCols } = getSheetPreview(sheet, 5);
+
+              if (rows.length === 0) {
+                const emptyMsg = el('div');
+                emptyMsg.style.cssText = 'font-size:0.78rem;color:var(--text-muted);padding:8px 0;';
+                emptyMsg.textContent = '데이터가 없습니다.';
+                previewWrap.appendChild(emptyMsg);
+              } else {
+                const table = el('table', 'sheet-preview-table');
+                rows.forEach((row, rIdx) => {
+                  const tr = el('tr');
+                  const th = el('td', 'row-num');
+                  th.textContent = rIdx + 1;
+                  tr.appendChild(th);
+                  row.forEach(val => {
+                    const td = el('td');
+                    td.textContent = val || '';
+                    td.title = val || '';
+                    tr.appendChild(td);
+                  });
+                  table.appendChild(tr);
+                });
+                previewWrap.appendChild(table);
+
+                // Overflow info
+                const parts = [];
+                if (totalRows > 5) parts.push(`${totalRows}행 중 5행만 표시`);
+                if (totalCols > shownCols) parts.push(`${totalCols}열 중 ${shownCols}열만 표시`);
+                if (parts.length > 0) {
+                  const info = el('div', 'sheet-preview-overflow');
+                  info.textContent = parts.join(' · ');
+                  previewWrap.appendChild(info);
+                }
+              }
+              previewWrap._built = true;
+            }
+            previewWrap.classList.add('visible');
+            toggleBtn.textContent = '미리보기 ▲';
+          }
+        });
+
+        sheetWrap.append(chipRow, previewWrap);
+        groupEl.appendChild(sheetWrap);
       });
 
-      groupEl.appendChild(grid);
       container.appendChild(groupEl);
     });
   }
@@ -1222,10 +1361,9 @@
     const activeKeys = state.selectedKeys.filter(k => (state.selectedCols[k] || []).length > 0);
     const multiSheet = activeKeys.length > 1;
 
-    const effectiveFmt = (fmt === 'xlsx') ? 'tab' : fmt;
     let separator;
-    if (effectiveFmt === 'tab') separator = '\t';
-    else if (effectiveFmt === 'csv') separator = ',';
+    if (fmt === 'tab') separator = '\t';
+    else if (fmt === 'csv') separator = ',';
     else separator = '\n';
 
     const lines = [];
@@ -1241,7 +1379,7 @@
         lines.push(label);
       }
 
-      if (effectiveFmt === 'newline') {
+      if (fmt === 'newline') {
         cols.forEach(col => lines.push(includeHeader ? `${col.letter}열: ${col.name}` : col.name));
       } else {
         // Tab or CSV: columns on a single line
@@ -1250,7 +1388,7 @@
           lines.push(letters.join(separator));
         }
         const names = cols.map(col => {
-          if (effectiveFmt === 'csv') {
+          if (fmt === 'csv') {
             const n = col.name;
             if (n.includes(',') || n.includes('"') || n.includes('\n')) {
               return '"' + n.replace(/"/g, '""') + '"';
@@ -1309,9 +1447,8 @@
     }
   });
 
-  // File download
-  function downloadAsXlsx() {
-    const { includeHeader } = getSelectedFormat();
+  // File download (always .xlsx)
+  document.getElementById('btnDownload').addEventListener('click', () => {
     const activeKeys = state.selectedKeys.filter(k => (state.selectedCols[k] || []).length > 0);
     if (activeKeys.length === 0) return;
 
@@ -1320,12 +1457,8 @@
       const cols = state.selectedCols[key] || [];
       if (cols.length === 0) return;
       const sheetInfo = state.allSheets.find(s => s.key === key);
-      const aoa = [];
-      if (includeHeader) {
-        aoa.push(cols.map(col => col.name));
-      }
+      const aoa = [cols.map(col => col.name)];
       const ws = XLSX.utils.aoa_to_sheet(aoa);
-      // Set column widths based on header text length
       ws['!cols'] = cols.map(col => ({ wch: Math.max(col.name.length * 2, 10) }));
       const sheetName = (activeKeys.length > 1 ? sheetInfo.sheetName : 'columns').substring(0, 31);
       XLSX.utils.book_append_sheet(wb, ws, sheetName);
@@ -1333,41 +1466,6 @@
 
     XLSX.writeFile(wb, 'columns_export.xlsx');
     showToast('✓ Excel 파일이 다운로드되었습니다!');
-  }
-
-  document.getElementById('btnDownload').addEventListener('click', () => {
-    const { fmt } = getSelectedFormat();
-
-    if (fmt === 'xlsx') {
-      downloadAsXlsx();
-      return;
-    }
-
-    const text = document.getElementById('previewBox')._copyText;
-    if (!text) return;
-
-    let mimeType, ext;
-    if (fmt === 'csv') {
-      mimeType = 'text/csv;charset=utf-8;';
-      ext = 'csv';
-    } else if (fmt === 'tab') {
-      mimeType = 'text/tab-separated-values;charset=utf-8;';
-      ext = 'tsv';
-    } else {
-      mimeType = 'text/plain;charset=utf-8;';
-      ext = 'txt';
-    }
-
-    const blob = new Blob(['\uFEFF' + text], { type: mimeType }); // BOM for Excel compatibility
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `columns_export.${ext}`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    showToast('✓ 파일이 다운로드되었습니다!');
   });
 </script>
 </body>
