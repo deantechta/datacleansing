@@ -1,0 +1,886 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Excel Column Picker</title>
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0f1117;
+      --surface: #1a1d27;
+      --surface2: #22263a;
+      --border: #2e3347;
+      --accent: #4f6ef7;
+      --accent-hover: #6b85ff;
+      --accent-dim: rgba(79,110,247,0.15);
+      --selected: #4f6ef7;
+      --selected-bg: rgba(79,110,247,0.18);
+      --text: #e8eaf6;
+      --text-muted: #7b82a0;
+      --success: #34d399;
+      --success-bg: rgba(52,211,153,0.12);
+      --danger: #f87171;
+      --radius: 12px;
+      --radius-sm: 8px;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 40px 20px;
+    }
+
+    header {
+      text-align: center;
+      margin-bottom: 40px;
+    }
+    header h1 {
+      font-size: 1.6rem;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+      color: var(--text);
+    }
+    header p {
+      margin-top: 8px;
+      color: var(--text-muted);
+      font-size: 0.9rem;
+    }
+
+    .container {
+      width: 100%;
+      max-width: 860px;
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+    }
+
+    /* STEP INDICATOR */
+    .steps {
+      display: flex;
+      align-items: center;
+      gap: 0;
+      margin-bottom: 8px;
+    }
+    .step-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      flex: 1;
+    }
+    .step-item.active { color: var(--accent); }
+    .step-item.done { color: var(--success); }
+    .step-num {
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      background: var(--surface2);
+      border: 2px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.7rem;
+      font-weight: 700;
+      flex-shrink: 0;
+    }
+    .step-item.active .step-num { background: var(--accent); border-color: var(--accent); color: #fff; }
+    .step-item.done .step-num { background: var(--success); border-color: var(--success); color: #fff; }
+    .step-line {
+      flex: 1;
+      height: 1px;
+      background: var(--border);
+      margin: 0 6px;
+    }
+    .step-item.done + .step-line { background: var(--success); }
+
+    /* CARD */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 28px;
+    }
+    .card-title {
+      font-size: 1rem;
+      font-weight: 600;
+      margin-bottom: 6px;
+    }
+    .card-desc {
+      font-size: 0.82rem;
+      color: var(--text-muted);
+      margin-bottom: 20px;
+      line-height: 1.5;
+    }
+
+    /* UPLOAD ZONE */
+    #dropzone {
+      border: 2px dashed var(--border);
+      border-radius: var(--radius);
+      padding: 56px 24px;
+      text-align: center;
+      cursor: pointer;
+      transition: border-color 0.2s, background 0.2s;
+    }
+    #dropzone:hover, #dropzone.dragover {
+      border-color: var(--accent);
+      background: var(--accent-dim);
+    }
+    #dropzone .icon {
+      font-size: 2.4rem;
+      margin-bottom: 14px;
+    }
+    #dropzone .label {
+      font-size: 0.95rem;
+      font-weight: 500;
+      margin-bottom: 6px;
+    }
+    #dropzone .hint {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+    }
+    #fileInput { display: none; }
+
+    /* SHEET SELECTION */
+    .sheet-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+    .sheet-chip {
+      padding: 8px 16px;
+      border-radius: 99px;
+      border: 1.5px solid var(--border);
+      background: var(--surface2);
+      cursor: pointer;
+      font-size: 0.85rem;
+      transition: all 0.15s;
+      user-select: none;
+    }
+    .sheet-chip:hover { border-color: var(--accent); }
+    .sheet-chip.selected {
+      border-color: var(--selected);
+      background: var(--selected-bg);
+      color: var(--accent);
+      font-weight: 600;
+    }
+
+    /* HEADER ROW SETTING */
+    .header-row-list {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .header-row-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 12px 16px;
+      gap: 16px;
+    }
+    .header-row-item .sheet-name {
+      font-size: 0.9rem;
+      font-weight: 500;
+      flex: 1;
+    }
+    .header-row-item .row-input-wrap {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.82rem;
+      color: var(--text-muted);
+    }
+    .header-row-item input[type="number"] {
+      width: 60px;
+      background: var(--surface);
+      border: 1.5px solid var(--border);
+      border-radius: var(--radius-sm);
+      color: var(--text);
+      padding: 6px 10px;
+      font-size: 0.85rem;
+      text-align: center;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    .header-row-item input[type="number"]:focus { border-color: var(--accent); }
+
+    /* COLUMN CARDS */
+    .sheet-section {
+      margin-bottom: 24px;
+    }
+    .sheet-section:last-child { margin-bottom: 0; }
+    .sheet-section-title {
+      font-size: 0.78rem;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 12px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--border);
+    }
+    .col-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .col-card {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
+      padding: 12px 14px;
+      border: 1.5px solid var(--border);
+      border-radius: var(--radius-sm);
+      background: var(--surface2);
+      cursor: pointer;
+      transition: all 0.15s;
+      user-select: none;
+      min-width: 72px;
+    }
+    .col-card:hover { border-color: var(--accent); transform: translateY(-1px); }
+    .col-card.selected {
+      border-color: var(--selected);
+      background: var(--selected-bg);
+    }
+    .col-card .col-letter {
+      font-size: 0.72rem;
+      font-weight: 700;
+      color: var(--accent);
+      background: var(--accent-dim);
+      padding: 2px 8px;
+      border-radius: 4px;
+    }
+    .col-card.selected .col-letter { background: var(--selected); color: #fff; }
+    .col-card .col-name {
+      font-size: 0.8rem;
+      font-weight: 500;
+      text-align: center;
+      word-break: keep-all;
+      max-width: 90px;
+      line-height: 1.3;
+    }
+
+    /* PREVIEW */
+    .preview-box {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 16px 20px;
+      font-family: 'Consolas', 'Monaco', monospace;
+      font-size: 0.82rem;
+      line-height: 1.8;
+      color: var(--text);
+      white-space: pre;
+      overflow-x: auto;
+    }
+    .preview-empty {
+      color: var(--text-muted);
+      font-style: italic;
+      font-family: inherit;
+    }
+
+    /* BUTTONS */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 11px 22px;
+      border-radius: var(--radius-sm);
+      font-size: 0.88rem;
+      font-weight: 600;
+      cursor: pointer;
+      border: none;
+      transition: all 0.15s;
+      outline: none;
+    }
+    .btn-primary {
+      background: var(--accent);
+      color: #fff;
+    }
+    .btn-primary:hover { background: var(--accent-hover); }
+    .btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
+    .btn-secondary {
+      background: var(--surface2);
+      border: 1.5px solid var(--border);
+      color: var(--text);
+    }
+    .btn-secondary:hover { border-color: var(--accent); color: var(--accent); }
+    .btn-success {
+      background: var(--success);
+      color: #0f1117;
+    }
+    .btn-success:hover { filter: brightness(1.1); }
+    .btn-success:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    .btn-row {
+      display: flex;
+      gap: 10px;
+      justify-content: flex-end;
+      margin-top: 20px;
+    }
+
+    /* SELECT ALL */
+    .select-all-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 14px;
+    }
+    .select-all-row .count-badge {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+    }
+    .select-all-row .count-badge span {
+      color: var(--accent);
+      font-weight: 700;
+    }
+
+    /* COPY SUCCESS TOAST */
+    #toast {
+      position: fixed;
+      bottom: 30px;
+      left: 50%;
+      transform: translateX(-50%) translateY(20px);
+      background: var(--success);
+      color: #0f1117;
+      font-weight: 700;
+      font-size: 0.9rem;
+      padding: 12px 28px;
+      border-radius: 99px;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.25s, transform 0.25s;
+      z-index: 999;
+    }
+    #toast.show {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+
+    /* SECTIONS VISIBILITY */
+    .section { display: none; }
+    .section.visible { display: block; }
+
+    /* FILE LOADED STATE */
+    .file-loaded-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 12px 16px;
+    }
+    .file-loaded-bar .file-info {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 0.88rem;
+    }
+    .file-loaded-bar .file-icon { font-size: 1.2rem; }
+    .file-loaded-bar .reset-btn {
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      cursor: pointer;
+      background: none;
+      border: none;
+      padding: 4px 10px;
+      border-radius: 6px;
+      transition: color 0.15s;
+    }
+    .file-loaded-bar .reset-btn:hover { color: var(--danger); }
+
+    hr.divider {
+      border: none;
+      border-top: 1px solid var(--border);
+      margin: 4px 0;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>Excel Column Picker</h1>
+  <p>열(컬럼) 정보를 빠르게 추출해서 클립보드로 복사</p>
+</header>
+
+<div class="container">
+
+  <!-- STEP INDICATOR -->
+  <div class="steps" id="stepIndicator">
+    <div class="step-item active" id="si-1">
+      <div class="step-num">1</div>
+      <span>파일 업로드</span>
+    </div>
+    <div class="step-line"></div>
+    <div class="step-item" id="si-2">
+      <div class="step-num">2</div>
+      <span>시트 선택</span>
+    </div>
+    <div class="step-line"></div>
+    <div class="step-item" id="si-3">
+      <div class="step-num">3</div>
+      <span>헤더 행 설정</span>
+    </div>
+    <div class="step-line"></div>
+    <div class="step-item" id="si-4">
+      <div class="step-num">4</div>
+      <span>컬럼 선택</span>
+    </div>
+    <div class="step-line"></div>
+    <div class="step-item" id="si-5">
+      <div class="step-num">5</div>
+      <span>복사</span>
+    </div>
+  </div>
+
+  <!-- STEP 1: UPLOAD -->
+  <div class="card section visible" id="sec-upload">
+    <div class="card-title">파일 업로드</div>
+    <div class="card-desc">xlsx 또는 xls 파일을 드래그하거나 클릭해서 선택하세요.</div>
+    <div id="dropzone">
+      <div class="icon">📂</div>
+      <div class="label">파일을 여기에 드래그하거나 클릭해서 선택</div>
+      <div class="hint">.xlsx, .xls 지원</div>
+    </div>
+    <input type="file" id="fileInput" accept=".xlsx,.xls" />
+  </div>
+
+  <!-- STEP 2: SHEET SELECTION -->
+  <div class="card section" id="sec-sheets">
+    <div id="fileLoadedBar"></div>
+    <hr class="divider" style="margin: 16px 0;" />
+    <div class="card-title">시트 선택</div>
+    <div class="card-desc">전처리할 시트를 선택하세요. 복수 선택 가능합니다.</div>
+    <div class="sheet-grid" id="sheetGrid"></div>
+    <div class="btn-row">
+      <button class="btn btn-primary" id="btnSheetNext" disabled>다음 →</button>
+    </div>
+  </div>
+
+  <!-- STEP 3: HEADER ROW -->
+  <div class="card section" id="sec-header">
+    <div class="card-title">헤더 행 설정</div>
+    <div class="card-desc">각 시트의 컬럼명이 위치한 행 번호를 입력하세요. (기본값: 1행)</div>
+    <div class="header-row-list" id="headerRowList"></div>
+    <div class="btn-row">
+      <button class="btn btn-secondary" id="btnHeaderBack">← 이전</button>
+      <button class="btn btn-primary" id="btnHeaderNext">다음 →</button>
+    </div>
+  </div>
+
+  <!-- STEP 4: COLUMN SELECTION -->
+  <div class="card section" id="sec-columns">
+    <div class="card-title">컬럼 선택</div>
+    <div class="card-desc">복사할 컬럼 카드를 클릭해서 선택하세요. 복수 선택 가능합니다.</div>
+    <div class="select-all-row">
+      <div class="count-badge">선택됨: <span id="selCount">0</span>개</div>
+      <button class="btn btn-secondary" id="btnSelectAll" style="padding:6px 14px; font-size:0.8rem;">전체 선택</button>
+    </div>
+    <div id="colSections"></div>
+    <div class="btn-row">
+      <button class="btn btn-secondary" id="btnColBack">← 이전</button>
+      <button class="btn btn-primary" id="btnColNext" disabled>결과 확인 →</button>
+    </div>
+  </div>
+
+  <!-- STEP 5: COPY -->
+  <div class="card section" id="sec-copy">
+    <div class="card-title">복사 확인</div>
+    <div class="card-desc">아래 내용이 클립보드에 복사됩니다. 확인 후 복사 버튼을 눌러주세요.</div>
+    <div class="preview-box" id="previewBox"></div>
+    <div class="btn-row">
+      <button class="btn btn-secondary" id="btnCopyBack">← 이전</button>
+      <button class="btn btn-success" id="btnCopy">📋 클립보드에 복사</button>
+    </div>
+  </div>
+
+</div>
+
+<div id="toast">✓ 클립보드에 복사되었습니다!</div>
+
+<script>
+  // ── State ──────────────────────────────────────────────────────────────────
+  const state = {
+    workbook: null,
+    fileName: '',
+    allSheets: [],
+    selectedSheets: [],    // sheet names
+    headerRows: {},        // { sheetName: rowNum }
+    selectedCols: {},      // { sheetName: [{ letter, name }] }
+  };
+
+  // ── Helpers ────────────────────────────────────────────────────────────────
+  function colIndexToLetter(idx) {
+    let letter = '';
+    let n = idx + 1;
+    while (n > 0) {
+      const rem = (n - 1) % 26;
+      letter = String.fromCharCode(65 + rem) + letter;
+      n = Math.floor((n - 1) / 26);
+    }
+    return letter;
+  }
+
+  function getColumnsFromSheet(sheet, headerRow) {
+    const range = XLSX.utils.decode_range(sheet['!ref'] || 'A1:A1');
+    const cols = [];
+    const row = headerRow - 1; // 0-indexed
+    if (row < range.s.r || row > range.e.r) return cols;
+    for (let c = range.s.c; c <= range.e.c; c++) {
+      const cell = sheet[XLSX.utils.encode_cell({ r: row, c })];
+      if (!cell || cell.v === undefined || cell.v === null || String(cell.v).trim() === '') continue;
+      cols.push({ letter: colIndexToLetter(c), name: String(cell.v).trim() });
+    }
+    return cols;
+  }
+
+  function showSection(id) {
+    document.querySelectorAll('.section').forEach(s => s.classList.remove('visible'));
+    document.getElementById(id).classList.add('visible');
+  }
+
+  function updateStepIndicator(active) {
+    for (let i = 1; i <= 5; i++) {
+      const el = document.getElementById(`si-${i}`);
+      el.classList.remove('active', 'done');
+      if (i < active) el.classList.add('done');
+      else if (i === active) el.classList.add('active');
+    }
+  }
+
+  function showToast(msg) {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.classList.add('show');
+    setTimeout(() => t.classList.remove('show'), 2400);
+  }
+
+  function buildFileBar() {
+    document.getElementById('fileLoadedBar').innerHTML = `
+      <div class="file-loaded-bar">
+        <div class="file-info">
+          <span class="file-icon">📊</span>
+          <strong>${state.fileName}</strong>
+          <span style="color:var(--text-muted);font-size:0.8rem;">${state.allSheets.length}개 시트</span>
+        </div>
+        <button class="reset-btn" id="resetBtn">× 다시 선택</button>
+      </div>`;
+    document.getElementById('resetBtn').addEventListener('click', resetAll);
+  }
+
+  function resetAll() {
+    Object.assign(state, { workbook: null, fileName: '', allSheets: [], selectedSheets: [], headerRows: {}, selectedCols: {} });
+    document.getElementById('sheetGrid').innerHTML = '';
+    document.getElementById('headerRowList').innerHTML = '';
+    document.getElementById('colSections').innerHTML = '';
+    document.getElementById('fileInput').value = '';
+    showSection('sec-upload');
+    updateStepIndicator(1);
+  }
+
+  // ── STEP 1: File Upload ────────────────────────────────────────────────────
+  const dropzone = document.getElementById('dropzone');
+  const fileInput = document.getElementById('fileInput');
+
+  dropzone.addEventListener('click', () => fileInput.click());
+  dropzone.addEventListener('dragover', e => { e.preventDefault(); dropzone.classList.add('dragover'); });
+  dropzone.addEventListener('dragleave', () => dropzone.classList.remove('dragover'));
+  dropzone.addEventListener('drop', e => {
+    e.preventDefault();
+    dropzone.classList.remove('dragover');
+    const file = e.dataTransfer.files[0];
+    if (file) processFile(file);
+  });
+  fileInput.addEventListener('change', e => {
+    if (e.target.files[0]) processFile(e.target.files[0]);
+  });
+
+  function processFile(file) {
+    const ext = file.name.split('.').pop().toLowerCase();
+    if (!['xlsx', 'xls'].includes(ext)) {
+      alert('xlsx 또는 xls 파일만 지원합니다.');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = e => {
+      try {
+        const data = new Uint8Array(e.target.result);
+        const wb = XLSX.read(data, { type: 'array' });
+        state.workbook = wb;
+        state.fileName = file.name;
+        state.allSheets = wb.SheetNames;
+
+        if (state.allSheets.length === 1) {
+          // Skip sheet selection
+          state.selectedSheets = [...state.allSheets];
+          state.headerRows[state.allSheets[0]] = 1;
+          buildHeaderRowStep();
+          showSection('sec-header');
+          updateStepIndicator(3);
+        } else {
+          buildFileBar();
+          buildSheetStep();
+          showSection('sec-sheets');
+          updateStepIndicator(2);
+        }
+      } catch (err) {
+        alert('파일을 읽는 중 오류가 발생했습니다: ' + err.message);
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  }
+
+  // ── STEP 2: Sheet Selection ────────────────────────────────────────────────
+  function buildSheetStep() {
+    const grid = document.getElementById('sheetGrid');
+    grid.innerHTML = '';
+    state.selectedSheets = [];
+    state.allSheets.forEach(name => {
+      const chip = document.createElement('div');
+      chip.className = 'sheet-chip';
+      chip.textContent = name;
+      chip.addEventListener('click', () => {
+        chip.classList.toggle('selected');
+        if (chip.classList.contains('selected')) {
+          state.selectedSheets.push(name);
+        } else {
+          state.selectedSheets = state.selectedSheets.filter(s => s !== name);
+        }
+        document.getElementById('btnSheetNext').disabled = state.selectedSheets.length === 0;
+      });
+      grid.appendChild(chip);
+    });
+    document.getElementById('btnSheetNext').disabled = true;
+  }
+
+  document.getElementById('btnSheetNext').addEventListener('click', () => {
+    // maintain order as in workbook
+    state.selectedSheets = state.allSheets.filter(s => state.selectedSheets.includes(s));
+    state.headerRows = {};
+    state.selectedSheets.forEach(s => { state.headerRows[s] = 1; });
+    buildHeaderRowStep();
+    showSection('sec-header');
+    updateStepIndicator(3);
+  });
+
+  // ── STEP 3: Header Row ─────────────────────────────────────────────────────
+  function buildHeaderRowStep() {
+    const list = document.getElementById('headerRowList');
+    list.innerHTML = '';
+    state.selectedSheets.forEach(name => {
+      const item = document.createElement('div');
+      item.className = 'header-row-item';
+      item.innerHTML = `
+        <div class="sheet-name">📄 ${name}</div>
+        <div class="row-input-wrap">
+          <span>헤더 행:</span>
+          <input type="number" min="1" max="999" value="${state.headerRows[name] || 1}" data-sheet="${name}" />
+          <span>행</span>
+        </div>`;
+      list.appendChild(item);
+    });
+  }
+
+  document.getElementById('btnHeaderBack').addEventListener('click', () => {
+    if (state.allSheets.length === 1) {
+      showSection('sec-upload');
+      updateStepIndicator(1);
+    } else {
+      showSection('sec-sheets');
+      updateStepIndicator(2);
+    }
+  });
+
+  document.getElementById('btnHeaderNext').addEventListener('click', () => {
+    // Save header row values
+    document.querySelectorAll('#headerRowList input[type="number"]').forEach(inp => {
+      const sheetName = inp.dataset.sheet;
+      const val = parseInt(inp.value, 10);
+      state.headerRows[sheetName] = isNaN(val) || val < 1 ? 1 : val;
+    });
+    buildColumnStep();
+    showSection('sec-columns');
+    updateStepIndicator(4);
+  });
+
+  // ── STEP 4: Column Selection ───────────────────────────────────────────────
+  function buildColumnStep() {
+    const container = document.getElementById('colSections');
+    container.innerHTML = '';
+    state.selectedCols = {};
+
+    state.selectedSheets.forEach(name => {
+      const sheet = state.workbook.Sheets[name];
+      const cols = getColumnsFromSheet(sheet, state.headerRows[name]);
+      state.selectedCols[name] = [];
+
+      const section = document.createElement('div');
+      section.className = 'sheet-section';
+
+      const showTitle = state.selectedSheets.length > 1;
+      if (showTitle) {
+        const title = document.createElement('div');
+        title.className = 'sheet-section-title';
+        title.textContent = name;
+        section.appendChild(title);
+      }
+
+      if (cols.length === 0) {
+        const empty = document.createElement('div');
+        empty.style.cssText = 'font-size:0.82rem;color:var(--text-muted);padding:8px 0;';
+        empty.textContent = '지정한 행에서 컬럼을 찾을 수 없습니다.';
+        section.appendChild(empty);
+        container.appendChild(section);
+        return;
+      }
+
+      const grid = document.createElement('div');
+      grid.className = 'col-grid';
+
+      cols.forEach(col => {
+        const card = document.createElement('div');
+        card.className = 'col-card';
+        card.dataset.sheet = name;
+        card.dataset.letter = col.letter;
+        card.dataset.name = col.name;
+        card.innerHTML = `
+          <div class="col-letter">${col.letter}열</div>
+          <div class="col-name">${col.name}</div>`;
+        card.addEventListener('click', () => toggleColCard(card, name, col));
+        grid.appendChild(card);
+      });
+
+      section.appendChild(grid);
+      container.appendChild(section);
+    });
+
+    updateSelCount();
+    document.getElementById('btnColNext').disabled = true;
+
+    // Select All toggle state
+    document.getElementById('btnSelectAll').textContent = '전체 선택';
+    document.getElementById('btnSelectAll')._allSelected = false;
+  }
+
+  function toggleColCard(card, sheetName, col) {
+    card.classList.toggle('selected');
+    if (card.classList.contains('selected')) {
+      if (!state.selectedCols[sheetName]) state.selectedCols[sheetName] = [];
+      state.selectedCols[sheetName].push(col);
+    } else {
+      state.selectedCols[sheetName] = state.selectedCols[sheetName].filter(c => c.letter !== col.letter);
+    }
+    updateSelCount();
+    const totalSel = Object.values(state.selectedCols).flat().length;
+    document.getElementById('btnColNext').disabled = totalSel === 0;
+  }
+
+  function updateSelCount() {
+    const total = Object.values(state.selectedCols).flat().length;
+    document.getElementById('selCount').textContent = total;
+  }
+
+  document.getElementById('btnSelectAll').addEventListener('click', function() {
+    const cards = document.querySelectorAll('#colSections .col-card');
+    const allSelected = this._allSelected;
+
+    // Reset
+    state.selectedSheets.forEach(name => { state.selectedCols[name] = []; });
+
+    cards.forEach(card => {
+      if (allSelected) {
+        card.classList.remove('selected');
+      } else {
+        card.classList.add('selected');
+        const name = card.dataset.sheet;
+        if (!state.selectedCols[name]) state.selectedCols[name] = [];
+        state.selectedCols[name].push({ letter: card.dataset.letter, name: card.dataset.name });
+      }
+    });
+
+    this._allSelected = !allSelected;
+    this.textContent = !allSelected ? '전체 해제' : '전체 선택';
+    updateSelCount();
+    const totalSel = Object.values(state.selectedCols).flat().length;
+    document.getElementById('btnColNext').disabled = totalSel === 0;
+  });
+
+  document.getElementById('btnColBack').addEventListener('click', () => {
+    showSection('sec-header');
+    updateStepIndicator(3);
+  });
+
+  document.getElementById('btnColNext').addEventListener('click', () => {
+    buildCopyStep();
+    showSection('sec-copy');
+    updateStepIndicator(5);
+  });
+
+  // ── STEP 5: Copy ───────────────────────────────────────────────────────────
+  function buildCopyStep() {
+    const lines = [];
+    const multiSheet = state.selectedSheets.filter(s => (state.selectedCols[s] || []).length > 0).length > 1;
+
+    state.selectedSheets.forEach(name => {
+      const cols = state.selectedCols[name] || [];
+      if (cols.length === 0) return;
+      if (multiSheet) lines.push(`[${name}]`);
+      cols.forEach(col => lines.push(`${col.letter}열: ${col.name}`));
+      if (multiSheet) lines.push('');
+    });
+
+    // Remove trailing blank line
+    while (lines.length && lines[lines.length - 1] === '') lines.pop();
+
+    const text = lines.join('\n');
+    const box = document.getElementById('previewBox');
+    if (text) {
+      box.textContent = text;
+      box.classList.remove('preview-empty');
+    } else {
+      box.textContent = '선택된 컬럼이 없습니다.';
+      box.classList.add('preview-empty');
+    }
+    box._copyText = text;
+  }
+
+  document.getElementById('btnCopyBack').addEventListener('click', () => {
+    showSection('sec-columns');
+    updateStepIndicator(4);
+  });
+
+  document.getElementById('btnCopy').addEventListener('click', async () => {
+    const text = document.getElementById('previewBox')._copyText;
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      showToast('✓ 클립보드에 복사되었습니다!');
+    } catch {
+      // Fallback
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.cssText = 'position:fixed;top:-9999px;left:-9999px;';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+      showToast('✓ 클립보드에 복사되었습니다!');
+    }
+  });
+</script>
+</body>
+</html>
