@@ -189,14 +189,15 @@
       margin-bottom: 16px;
     }
     .sheet-group-title {
-      font-size: 0.75rem;
+      font-size: 0.78rem;
       font-weight: 600;
-      color: var(--text-muted);
-      text-transform: uppercase;
-      letter-spacing: 1px;
-      margin-bottom: 8px;
-      padding-bottom: 6px;
-      border-bottom: 1px solid var(--border);
+      color: var(--accent);
+      letter-spacing: 0.5px;
+      margin-bottom: 10px;
+      padding: 6px 12px;
+      background: var(--accent-dim);
+      border-left: 3px solid var(--accent);
+      border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
     }
     .sheet-grid {
       display: flex;
@@ -427,6 +428,129 @@
       border-top: 1px solid var(--border);
       margin: 4px 0;
     }
+
+    /* FORMAT OPTIONS */
+    .format-options {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 16px;
+      align-items: center;
+      margin-bottom: 16px;
+      padding: 14px 16px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+    }
+    .format-options label {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.82rem;
+      cursor: pointer;
+      color: var(--text);
+    }
+    .format-options input[type="radio"],
+    .format-options input[type="checkbox"] {
+      accent-color: var(--accent);
+      cursor: pointer;
+    }
+    .format-group-title {
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: var(--text-muted);
+      margin-right: 4px;
+    }
+    .format-divider {
+      width: 1px;
+      height: 20px;
+      background: var(--border);
+    }
+
+    /* COLUMN SEARCH */
+    .col-search-wrap {
+      margin-bottom: 14px;
+    }
+    .col-search-wrap input {
+      width: 100%;
+      background: var(--bg);
+      border: 1.5px solid var(--border);
+      border-radius: var(--radius-sm);
+      color: var(--text);
+      padding: 10px 14px;
+      font-size: 0.85rem;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    .col-search-wrap input::placeholder { color: var(--text-muted); }
+    .col-search-wrap input:focus { border-color: var(--accent); }
+
+    /* COLUMN TOOLTIP */
+    .col-card {
+      position: relative;
+    }
+    .col-tooltip {
+      display: none;
+      position: absolute;
+      bottom: calc(100% + 8px);
+      left: 50%;
+      transform: translateX(-50%);
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 10px 14px;
+      font-size: 0.75rem;
+      line-height: 1.6;
+      color: var(--text-muted);
+      white-space: nowrap;
+      z-index: 100;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+      pointer-events: none;
+    }
+    .col-tooltip::after {
+      content: '';
+      position: absolute;
+      top: 100%;
+      left: 50%;
+      transform: translateX(-50%);
+      border: 6px solid transparent;
+      border-top-color: var(--border);
+    }
+    .col-card:hover .col-tooltip { display: block; }
+
+    /* INLINE ERROR */
+    .error-inline {
+      background: rgba(248,113,113,0.1);
+      border: 1px solid rgba(248,113,113,0.3);
+      border-radius: var(--radius-sm);
+      padding: 14px 18px;
+      font-size: 0.85rem;
+      color: var(--danger);
+      margin-top: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .error-inline .error-msg { flex: 1; }
+    .error-inline .btn { white-space: nowrap; flex-shrink: 0; }
+
+    /* FILE SIZE HINT */
+    .upload-hint-extra {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      margin-top: 8px;
+      opacity: 0.7;
+    }
+
+    /* DOWNLOAD BUTTON */
+    .btn-download {
+      background: var(--surface2);
+      border: 1.5px solid var(--accent);
+      color: var(--accent);
+    }
+    .btn-download:hover {
+      background: var(--accent-dim);
+    }
   </style>
 </head>
 <body>
@@ -462,7 +586,7 @@
     <div class="step-line"></div>
     <div class="step-item" id="si-5">
       <div class="step-num">5</div>
-      <span>복사</span>
+      <span>내보내기</span>
     </div>
   </div>
 
@@ -474,7 +598,9 @@
       <div class="icon">📂</div>
       <div class="label">파일을 여기에 드래그하거나 클릭해서 선택</div>
       <div class="hint">.xlsx, .xls, .csv 지원 · 복수 파일 선택 가능</div>
+      <div class="upload-hint-extra">최대 파일 크기: 50MB · 병합 셀이 포함된 파일은 정상적으로 처리되지 않을 수 있습니다</div>
     </div>
+    <div id="uploadError"></div>
     <input type="file" id="fileInput" accept=".xlsx,.xls,.csv" multiple />
   </div>
 
@@ -506,6 +632,9 @@
   <div class="card section" id="sec-columns">
     <div class="card-title">컬럼 선택</div>
     <div class="card-desc">복사할 컬럼 카드를 클릭해서 선택하세요. 복수 선택 가능합니다.</div>
+    <div class="col-search-wrap">
+      <input type="text" id="colSearchInput" placeholder="컬럼 이름으로 검색..." />
+    </div>
     <div class="select-all-row">
       <div class="count-badge">선택됨: <span id="selCount">0</span>개</div>
       <button class="btn btn-secondary" id="btnSelectAll" style="padding:6px 14px; font-size:0.8rem;">전체 선택</button>
@@ -519,11 +648,20 @@
 
   <!-- STEP 5: COPY -->
   <div class="card section" id="sec-copy">
-    <div class="card-title">복사 확인</div>
-    <div class="card-desc">아래 내용이 클립보드에 복사됩니다. 확인 후 복사 버튼을 눌러주세요.</div>
+    <div class="card-title">내보내기</div>
+    <div class="card-desc">출력 형식을 선택한 뒤, 클립보드에 복사하거나 파일로 다운로드하세요.</div>
+    <div class="format-options">
+      <span class="format-group-title">구분자</span>
+      <label><input type="radio" name="fmt" value="tab" checked /> 탭 (Excel 붙여넣기)</label>
+      <label><input type="radio" name="fmt" value="csv" /> 쉼표 (CSV)</label>
+      <label><input type="radio" name="fmt" value="newline" /> 줄바꿈만</label>
+      <div class="format-divider"></div>
+      <label><input type="checkbox" id="fmtHeader" checked /> 헤더(컬럼명) 포함</label>
+    </div>
     <div class="preview-box" id="previewBox"></div>
     <div class="btn-row">
       <button class="btn btn-secondary" id="btnCopyBack">← 이전</button>
+      <button class="btn btn-download" id="btnDownload">↓ 파일 다운로드</button>
       <button class="btn btn-success" id="btnCopy">📋 클립보드에 복사</button>
     </div>
   </div>
@@ -566,6 +704,25 @@
       cols.push({ letter: colIndexToLetter(c), name: String(cell.v).trim() });
     }
     return cols;
+  }
+
+  function getColumnPreview(sheet, headerRow, colLetter) {
+    const range = XLSX.utils.decode_range(sheet['!ref'] || 'A1:A1');
+    const values = [];
+    // Convert letter to column index
+    let colIdx = 0;
+    for (let i = 0; i < colLetter.length; i++) {
+      colIdx = colIdx * 26 + (colLetter.charCodeAt(i) - 64);
+    }
+    colIdx -= 1; // 0-indexed
+    const startRow = headerRow; // skip header row (headerRow is 1-indexed, data starts at next row)
+    for (let r = startRow; r <= range.e.r && values.length < 5; r++) {
+      const cell = sheet[XLSX.utils.encode_cell({ r, c: colIdx })];
+      if (cell && cell.v !== undefined && cell.v !== null && String(cell.v).trim() !== '') {
+        values.push(String(cell.v).trim());
+      }
+    }
+    return values;
   }
 
   // Safe DOM text setter — prevents XSS from file/sheet/column names
@@ -694,18 +851,46 @@
     if (e.target.files.length) processFiles(Array.from(e.target.files));
   });
 
+  const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
+
+  function showUploadError(msg, showReset) {
+    const container = document.getElementById('uploadError');
+    container.innerHTML = '';
+    if (!msg) return;
+    const errEl = el('div', 'error-inline');
+    const msgEl = el('span', 'error-msg');
+    msgEl.textContent = msg;
+    errEl.appendChild(msgEl);
+    if (showReset) {
+      const btn = el('button', 'btn btn-secondary');
+      btn.style.cssText = 'padding:6px 14px;font-size:0.8rem;';
+      btn.textContent = '1단계로 돌아가기';
+      btn.addEventListener('click', resetAll);
+      errEl.appendChild(btn);
+    }
+    container.appendChild(errEl);
+  }
+
   function processFiles(files) {
+    showUploadError(''); // clear previous errors
     const validFiles = files.filter(f => {
       const ext = f.name.split('.').pop().toLowerCase();
       return ['xlsx', 'xls', 'csv'].includes(ext);
     });
 
     if (validFiles.length === 0) {
-      alert('xlsx, xls, csv 파일만 지원합니다.');
+      showUploadError('xlsx, xls, csv 파일만 지원합니다.');
       return;
     }
+
+    const oversized = validFiles.filter(f => f.size > MAX_FILE_SIZE);
+    if (oversized.length > 0) {
+      showUploadError(`파일 크기 초과 (50MB 제한): ${oversized.map(f => f.name).join(', ')}`);
+      return;
+    }
+
     if (validFiles.length !== files.length) {
-      alert(`지원하지 않는 형식의 ${files.length - validFiles.length}개 파일은 무시되었습니다.`);
+      showUploadError(`지원하지 않는 형식의 ${files.length - validFiles.length}개 파일은 무시되었습니다.`);
     }
 
     let loaded = 0;
@@ -716,11 +901,10 @@
       if (ext === 'csv') {
         reader.onload = e => {
           try {
-            // SheetJS parses CSV via string type; sheet name defaults to "Sheet1"
             const wb = XLSX.read(e.target.result, { type: 'string' });
             state.files.push({ fileName: file.name, workbook: wb });
           } catch (err) {
-            alert(`"${file.name}" 읽기 오류: ${err.message}`);
+            showUploadError(`"${file.name}" 읽기 오류: ${err.message}`, true);
           }
           loaded++;
           if (loaded === validFiles.length) onAllFilesLoaded();
@@ -733,7 +917,7 @@
             const wb = XLSX.read(data, { type: 'array' });
             state.files.push({ fileName: file.name, workbook: wb });
           } catch (err) {
-            alert(`"${file.name}" 읽기 오류: ${err.message}`);
+            showUploadError(`"${file.name}" 읽기 오류: ${err.message}`, true);
           }
           loaded++;
           if (loaded === validFiles.length) onAllFilesLoaded();
@@ -927,7 +1111,16 @@
         letterEl.textContent = col.letter + '열';
         const nameEl = el('div', 'col-name');
         nameEl.textContent = col.name;
-        card.append(letterEl, nameEl);
+
+        // Tooltip: preview first 5 data values
+        const tooltip = el('div', 'col-tooltip');
+        const previewVals = getColumnPreview(sheet, state.headerRows[key], col.letter);
+        if (previewVals.length > 0) {
+          tooltip.textContent = previewVals.join('\n');
+        } else {
+          tooltip.textContent = '(데이터 없음)';
+        }
+        card.append(letterEl, nameEl, tooltip);
 
         card.addEventListener('click', () => toggleColCard(card, key, col));
         grid.appendChild(card);
@@ -941,6 +1134,7 @@
     document.getElementById('btnColNext').disabled = true;
     document.getElementById('btnSelectAll').textContent = '전체 선택';
     document.getElementById('btnSelectAll')._allSelected = false;
+    document.getElementById('colSearchInput').value = '';
   }
 
   function toggleColCard(card, key, col) {
@@ -962,6 +1156,16 @@
   function updateSelCount() {
     document.getElementById('selCount').textContent = totalSelected();
   }
+
+  // Column search filter
+  document.getElementById('colSearchInput').addEventListener('input', function() {
+    const query = this.value.trim().toLowerCase();
+    document.querySelectorAll('#colSections .col-card').forEach(card => {
+      const name = (card.dataset.colName || '').toLowerCase();
+      const letter = (card.dataset.letter || '').toLowerCase();
+      card.style.display = (query === '' || name.includes(query) || letter.includes(query)) ? '' : 'none';
+    });
+  });
 
   document.getElementById('btnSelectAll').addEventListener('click', function() {
     const cards = document.querySelectorAll('#colSections .col-card');
@@ -997,28 +1201,60 @@
     updateStepIndicator(5);
   });
 
-  // ── STEP 5: Copy ───────────────────────────────────────────────────────────
-  function buildCopyStep() {
-    const lines = [];
+  // ── STEP 5: Export ──────────────────────────────────────────────────────────
+  function getSelectedFormat() {
+    const fmt = document.querySelector('input[name="fmt"]:checked').value;
+    const includeHeader = document.getElementById('fmtHeader').checked;
+    return { fmt, includeHeader };
+  }
+
+  function buildFormattedText() {
+    const { fmt, includeHeader } = getSelectedFormat();
     const activeKeys = state.selectedKeys.filter(k => (state.selectedCols[k] || []).length > 0);
     const multiSheet = activeKeys.length > 1;
 
+    let separator;
+    if (fmt === 'tab') separator = '\t';
+    else if (fmt === 'csv') separator = ',';
+    else separator = '\n';
+
+    const lines = [];
     activeKeys.forEach(key => {
       const cols = state.selectedCols[key] || [];
       if (cols.length === 0) return;
       const sheetInfo = state.allSheets.find(s => s.key === key);
-      // Always show filename; show sheetname when multiple sheets are selected
-      const label = multiSheet
-        ? `[${sheetInfo.fileName} / ${sheetInfo.sheetName}]`
-        : `[${sheetInfo.fileName}]`;
-      lines.push(label);
-      cols.forEach(col => lines.push(`${col.letter}열: ${col.name}`));
+
+      if (includeHeader) {
+        const label = multiSheet
+          ? `[${sheetInfo.fileName} / ${sheetInfo.sheetName}]`
+          : `[${sheetInfo.fileName}]`;
+        lines.push(label);
+      }
+
+      if (fmt === 'newline') {
+        cols.forEach(col => lines.push(includeHeader ? `${col.letter}열: ${col.name}` : col.name));
+      } else {
+        // Tab or CSV: columns on a single line
+        if (includeHeader) {
+          const letters = cols.map(col => col.letter + '열');
+          lines.push(letters.join(separator));
+        }
+        const names = cols.map(col => {
+          // Escape commas in CSV mode
+          if (fmt === 'csv' && col.name.includes(',')) return `"${col.name}"`;
+          return col.name;
+        });
+        lines.push(names.join(separator));
+      }
       lines.push('');
     });
 
     while (lines.length && lines[lines.length - 1] === '') lines.pop();
+    return lines.join('\n');
+  }
 
-    const text = lines.join('\n');
+  function buildCopyStep() {
+    const text = buildFormattedText();
     const box = document.getElementById('previewBox');
     if (text) {
       box.textContent = text;
@@ -1029,6 +1265,12 @@
     }
     box._copyText = text;
   }
+
+  // Re-render preview when format options change
+  document.querySelectorAll('input[name="fmt"]').forEach(r => {
+    r.addEventListener('change', buildCopyStep);
+  });
+  document.getElementById('fmtHeader').addEventListener('change', buildCopyStep);
 
   document.getElementById('btnCopyBack').addEventListener('click', () => {
     showSection('sec-columns');
@@ -1042,7 +1284,6 @@
       await navigator.clipboard.writeText(text);
       showToast('✓ 클립보드에 복사되었습니다!');
     } catch {
-      // Fallback for browsers without Clipboard API
       const ta = document.createElement('textarea');
       ta.value = text;
       ta.style.cssText = 'position:fixed;top:-9999px;left:-9999px;';
@@ -1052,6 +1293,36 @@
       document.body.removeChild(ta);
       showToast('✓ 클립보드에 복사되었습니다!');
     }
+  });
+
+  // File download
+  document.getElementById('btnDownload').addEventListener('click', () => {
+    const { fmt } = getSelectedFormat();
+    const text = document.getElementById('previewBox')._copyText;
+    if (!text) return;
+
+    let mimeType, ext;
+    if (fmt === 'csv') {
+      mimeType = 'text/csv;charset=utf-8;';
+      ext = 'csv';
+    } else if (fmt === 'tab') {
+      mimeType = 'text/tab-separated-values;charset=utf-8;';
+      ext = 'tsv';
+    } else {
+      mimeType = 'text/plain;charset=utf-8;';
+      ext = 'txt';
+    }
+
+    const blob = new Blob(['\uFEFF' + text], { type: mimeType }); // BOM for Excel compatibility
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `columns_export.${ext}`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    showToast('✓ 파일이 다운로드되었습니다!');
   });
 </script>
 </body>
