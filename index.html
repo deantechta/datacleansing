@@ -1001,21 +1001,19 @@
   function buildCopyStep() {
     const lines = [];
     const activeKeys = state.selectedKeys.filter(k => (state.selectedCols[k] || []).length > 0);
-    const multiSection = activeKeys.length > 1;
-    const multiFile = state.files.length > 1;
+    const multiSheet = activeKeys.length > 1;
 
     activeKeys.forEach(key => {
       const cols = state.selectedCols[key] || [];
       if (cols.length === 0) return;
-      if (multiSection) {
-        const sheetInfo = state.allSheets.find(s => s.key === key);
-        const label = multiFile
-          ? `[${sheetInfo.fileName} / ${sheetInfo.sheetName}]`
-          : `[${sheetInfo.sheetName}]`;
-        lines.push(label);
-      }
+      const sheetInfo = state.allSheets.find(s => s.key === key);
+      // Always show filename; show sheetname when multiple sheets are selected
+      const label = multiSheet
+        ? `[${sheetInfo.fileName} / ${sheetInfo.sheetName}]`
+        : `[${sheetInfo.fileName}]`;
+      lines.push(label);
       cols.forEach(col => lines.push(`${col.letter}열: ${col.name}`));
-      if (multiSection) lines.push('');
+      lines.push('');
     });
 
     while (lines.length && lines[lines.length - 1] === '') lines.pop();
