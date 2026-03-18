@@ -598,15 +598,6 @@
       font-style: italic;
     }
 
-    /* DOWNLOAD BUTTON */
-    .btn-download {
-      background: var(--surface2);
-      border: 1.5px solid var(--accent);
-      color: var(--accent);
-    }
-    .btn-download:hover {
-      background: var(--accent-dim);
-    }
   </style>
 </head>
 <body>
@@ -642,7 +633,7 @@
     <div class="step-line"></div>
     <div class="step-item" id="si-5">
       <div class="step-num">5</div>
-      <span>내보내기</span>
+      <span>복사</span>
     </div>
   </div>
 
@@ -704,8 +695,8 @@
 
   <!-- STEP 5: COPY -->
   <div class="card section" id="sec-copy">
-    <div class="card-title">내보내기</div>
-    <div class="card-desc">출력 형식을 선택한 뒤, 클립보드에 복사하거나 파일로 다운로드하세요.</div>
+    <div class="card-title">복사 확인</div>
+    <div class="card-desc">출력 형식을 선택한 뒤, 클립보드에 복사하세요.</div>
     <div class="format-options">
       <span class="format-group-title">클립보드 구분자</span>
       <label><input type="radio" name="fmt" value="tab" checked /> 탭 (Excel 붙여넣기)</label>
@@ -717,7 +708,6 @@
     <div class="preview-box" id="previewBox"></div>
     <div class="btn-row">
       <button class="btn btn-secondary" id="btnCopyBack">← 이전</button>
-      <button class="btn btn-download" id="btnDownload">↓ Excel 다운로드</button>
       <button class="btn btn-success" id="btnCopy">📋 클립보드에 복사</button>
     </div>
   </div>
@@ -1447,26 +1437,6 @@
     }
   });
 
-  // File download (always .xlsx)
-  document.getElementById('btnDownload').addEventListener('click', () => {
-    const activeKeys = state.selectedKeys.filter(k => (state.selectedCols[k] || []).length > 0);
-    if (activeKeys.length === 0) return;
-
-    const wb = XLSX.utils.book_new();
-    activeKeys.forEach(key => {
-      const cols = state.selectedCols[key] || [];
-      if (cols.length === 0) return;
-      const sheetInfo = state.allSheets.find(s => s.key === key);
-      const aoa = [cols.map(col => col.name)];
-      const ws = XLSX.utils.aoa_to_sheet(aoa);
-      ws['!cols'] = cols.map(col => ({ wch: Math.max(col.name.length * 2, 10) }));
-      const sheetName = (activeKeys.length > 1 ? sheetInfo.sheetName : 'columns').substring(0, 31);
-      XLSX.utils.book_append_sheet(wb, ws, sheetName);
-    });
-
-    XLSX.writeFile(wb, 'columns_export.xlsx');
-    showToast('✓ Excel 파일이 다운로드되었습니다!');
-  });
 </script>
 </body>
 </html>
