@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Excel Column Picker</title>
-  <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js" crossorigin="anonymous"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -149,7 +149,55 @@
     }
     #fileInput { display: none; }
 
+    /* FILE LIST */
+    .file-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+    .file-loaded-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 12px 16px;
+    }
+    .file-loaded-bar .file-info {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 0.88rem;
+    }
+    .file-loaded-bar .file-icon { font-size: 1.2rem; }
+    .file-loaded-bar .reset-btn {
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      cursor: pointer;
+      background: none;
+      border: none;
+      padding: 4px 10px;
+      border-radius: 6px;
+      transition: color 0.15s;
+    }
+    .file-loaded-bar .reset-btn:hover { color: var(--danger); }
+
     /* SHEET SELECTION */
+    .sheet-group {
+      margin-bottom: 16px;
+    }
+    .sheet-group-title {
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 8px;
+      padding-bottom: 6px;
+      border-bottom: 1px solid var(--border);
+    }
     .sheet-grid {
       display: flex;
       flex-wrap: wrap;
@@ -374,35 +422,6 @@
     .section { display: none; }
     .section.visible { display: block; }
 
-    /* FILE LOADED STATE */
-    .file-loaded-bar {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      background: var(--surface2);
-      border: 1px solid var(--border);
-      border-radius: var(--radius-sm);
-      padding: 12px 16px;
-    }
-    .file-loaded-bar .file-info {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      font-size: 0.88rem;
-    }
-    .file-loaded-bar .file-icon { font-size: 1.2rem; }
-    .file-loaded-bar .reset-btn {
-      font-size: 0.78rem;
-      color: var(--text-muted);
-      cursor: pointer;
-      background: none;
-      border: none;
-      padding: 4px 10px;
-      border-radius: 6px;
-      transition: color 0.15s;
-    }
-    .file-loaded-bar .reset-btn:hover { color: var(--danger); }
-
     hr.divider {
       border: none;
       border-top: 1px solid var(--border);
@@ -450,13 +469,13 @@
   <!-- STEP 1: UPLOAD -->
   <div class="card section visible" id="sec-upload">
     <div class="card-title">파일 업로드</div>
-    <div class="card-desc">xlsx 또는 xls 파일을 드래그하거나 클릭해서 선택하세요.</div>
+    <div class="card-desc">xlsx, xls, csv 파일을 드래그하거나 클릭해서 선택하세요. 여러 파일을 동시에 선택할 수 있습니다.</div>
     <div id="dropzone">
       <div class="icon">📂</div>
       <div class="label">파일을 여기에 드래그하거나 클릭해서 선택</div>
-      <div class="hint">.xlsx, .xls 지원</div>
+      <div class="hint">.xlsx, .xls, .csv 지원 · 복수 파일 선택 가능</div>
     </div>
-    <input type="file" id="fileInput" accept=".xlsx,.xls" />
+    <input type="file" id="fileInput" accept=".xlsx,.xls,.csv" multiple />
   </div>
 
   <!-- STEP 2: SHEET SELECTION -->
@@ -465,8 +484,9 @@
     <hr class="divider" style="margin: 16px 0;" />
     <div class="card-title">시트 선택</div>
     <div class="card-desc">전처리할 시트를 선택하세요. 복수 선택 가능합니다.</div>
-    <div class="sheet-grid" id="sheetGrid"></div>
+    <div id="sheetGroups"></div>
     <div class="btn-row">
+      <button class="btn btn-secondary" id="btnSheetBack">← 이전</button>
       <button class="btn btn-primary" id="btnSheetNext" disabled>다음 →</button>
     </div>
   </div>
@@ -514,13 +534,13 @@
 
 <script>
   // ── State ──────────────────────────────────────────────────────────────────
+  // sheet key: `${fileIdx}::${sheetName}` — prevents collisions across files
   const state = {
-    workbook: null,
-    fileName: '',
-    allSheets: [],
-    selectedSheets: [],    // sheet names
-    headerRows: {},        // { sheetName: rowNum }
-    selectedCols: {},      // { sheetName: [{ letter, name }] }
+    files: [],          // [{ fileName, workbook }]
+    allSheets: [],      // [{ key, fileIdx, fileName, sheetName }]
+    selectedKeys: [],   // sheet keys
+    headerRows: {},     // { key: rowNum }
+    selectedCols: {},   // { key: [{ letter, name }] }
   };
 
   // ── Helpers ────────────────────────────────────────────────────────────────
@@ -548,6 +568,18 @@
     return cols;
   }
 
+  // Safe DOM text setter — prevents XSS from file/sheet/column names
+  function setText(el, text) {
+    el.textContent = text;
+    return el;
+  }
+
+  function el(tag, className) {
+    const e = document.createElement(tag);
+    if (className) e.className = className;
+    return e;
+  }
+
   function showSection(id) {
     document.querySelectorAll('.section').forEach(s => s.classList.remove('visible'));
     document.getElementById(id).classList.add('visible');
@@ -555,10 +587,10 @@
 
   function updateStepIndicator(active) {
     for (let i = 1; i <= 5; i++) {
-      const el = document.getElementById(`si-${i}`);
-      el.classList.remove('active', 'done');
-      if (i < active) el.classList.add('done');
-      else if (i === active) el.classList.add('active');
+      const e = document.getElementById(`si-${i}`);
+      e.classList.remove('active', 'done');
+      if (i < active) e.classList.add('done');
+      else if (i === active) e.classList.add('active');
     }
   }
 
@@ -569,22 +601,76 @@
     setTimeout(() => t.classList.remove('show'), 2400);
   }
 
+  // ── Build file loaded bar (XSS-safe DOM construction) ─────────────────────
   function buildFileBar() {
-    document.getElementById('fileLoadedBar').innerHTML = `
-      <div class="file-loaded-bar">
-        <div class="file-info">
-          <span class="file-icon">📊</span>
-          <strong>${state.fileName}</strong>
-          <span style="color:var(--text-muted);font-size:0.8rem;">${state.allSheets.length}개 시트</span>
-        </div>
-        <button class="reset-btn" id="resetBtn">× 다시 선택</button>
-      </div>`;
-    document.getElementById('resetBtn').addEventListener('click', resetAll);
+    const bar = document.getElementById('fileLoadedBar');
+    bar.innerHTML = '';
+
+    const wrapper = el('div', 'file-list');
+    state.files.forEach((f, idx) => {
+      const row = el('div', 'file-loaded-bar');
+
+      const info = el('div', 'file-info');
+      const icon = el('span', 'file-icon');
+      icon.textContent = '📊';
+      const name = el('strong');
+      name.textContent = f.fileName;
+      const sheetCount = el('span');
+      sheetCount.style.cssText = 'color:var(--text-muted);font-size:0.8rem;';
+      sheetCount.textContent = `${f.workbook.SheetNames.length}개 시트`;
+      info.append(icon, name, sheetCount);
+
+      const resetBtn = el('button', 'reset-btn');
+      resetBtn.textContent = '× 제거';
+      resetBtn.addEventListener('click', () => removeFile(idx));
+
+      row.append(info, resetBtn);
+      wrapper.appendChild(row);
+    });
+
+    const resetAllBtn = el('button', 'btn btn-secondary');
+    resetAllBtn.style.cssText = 'margin-top:8px;padding:7px 16px;font-size:0.8rem;';
+    resetAllBtn.textContent = '× 전체 초기화';
+    resetAllBtn.addEventListener('click', resetAll);
+    wrapper.appendChild(resetAllBtn);
+
+    bar.appendChild(wrapper);
+  }
+
+  function removeFile(idx) {
+    state.files.splice(idx, 1);
+    if (state.files.length === 0) {
+      resetAll();
+      return;
+    }
+    rebuildAllSheets();
+    buildFileBar();
+    buildSheetStep();
+  }
+
+  function rebuildAllSheets() {
+    state.allSheets = [];
+    state.files.forEach((f, fileIdx) => {
+      f.workbook.SheetNames.forEach(sheetName => {
+        state.allSheets.push({
+          key: `${fileIdx}::${sheetName}`,
+          fileIdx,
+          fileName: f.fileName,
+          sheetName,
+        });
+      });
+    });
   }
 
   function resetAll() {
-    Object.assign(state, { workbook: null, fileName: '', allSheets: [], selectedSheets: [], headerRows: {}, selectedCols: {} });
-    document.getElementById('sheetGrid').innerHTML = '';
+    Object.assign(state, {
+      files: [],
+      allSheets: [],
+      selectedKeys: [],
+      headerRows: {},
+      selectedCols: {},
+    });
+    document.getElementById('sheetGroups').innerHTML = '';
     document.getElementById('headerRowList').innerHTML = '';
     document.getElementById('colSections').innerHTML = '';
     document.getElementById('fileInput').value = '';
@@ -602,95 +688,173 @@
   dropzone.addEventListener('drop', e => {
     e.preventDefault();
     dropzone.classList.remove('dragover');
-    const file = e.dataTransfer.files[0];
-    if (file) processFile(file);
+    processFiles(Array.from(e.dataTransfer.files));
   });
   fileInput.addEventListener('change', e => {
-    if (e.target.files[0]) processFile(e.target.files[0]);
+    if (e.target.files.length) processFiles(Array.from(e.target.files));
   });
 
-  function processFile(file) {
-    const ext = file.name.split('.').pop().toLowerCase();
-    if (!['xlsx', 'xls'].includes(ext)) {
-      alert('xlsx 또는 xls 파일만 지원합니다.');
+  function processFiles(files) {
+    const validFiles = files.filter(f => {
+      const ext = f.name.split('.').pop().toLowerCase();
+      return ['xlsx', 'xls', 'csv'].includes(ext);
+    });
+
+    if (validFiles.length === 0) {
+      alert('xlsx, xls, csv 파일만 지원합니다.');
       return;
     }
-    const reader = new FileReader();
-    reader.onload = e => {
-      try {
-        const data = new Uint8Array(e.target.result);
-        const wb = XLSX.read(data, { type: 'array' });
-        state.workbook = wb;
-        state.fileName = file.name;
-        state.allSheets = wb.SheetNames;
+    if (validFiles.length !== files.length) {
+      alert(`지원하지 않는 형식의 ${files.length - validFiles.length}개 파일은 무시되었습니다.`);
+    }
 
-        if (state.allSheets.length === 1) {
-          // Skip sheet selection
-          state.selectedSheets = [...state.allSheets];
-          state.headerRows[state.allSheets[0]] = 1;
-          buildHeaderRowStep();
-          showSection('sec-header');
-          updateStepIndicator(3);
-        } else {
-          buildFileBar();
-          buildSheetStep();
-          showSection('sec-sheets');
-          updateStepIndicator(2);
-        }
-      } catch (err) {
-        alert('파일을 읽는 중 오류가 발생했습니다: ' + err.message);
+    let loaded = 0;
+    validFiles.forEach(file => {
+      const ext = file.name.split('.').pop().toLowerCase();
+      const reader = new FileReader();
+
+      if (ext === 'csv') {
+        reader.onload = e => {
+          try {
+            // SheetJS parses CSV via string type; sheet name defaults to "Sheet1"
+            const wb = XLSX.read(e.target.result, { type: 'string' });
+            state.files.push({ fileName: file.name, workbook: wb });
+          } catch (err) {
+            alert(`"${file.name}" 읽기 오류: ${err.message}`);
+          }
+          loaded++;
+          if (loaded === validFiles.length) onAllFilesLoaded();
+        };
+        reader.readAsText(file, 'UTF-8');
+      } else {
+        reader.onload = e => {
+          try {
+            const data = new Uint8Array(e.target.result);
+            const wb = XLSX.read(data, { type: 'array' });
+            state.files.push({ fileName: file.name, workbook: wb });
+          } catch (err) {
+            alert(`"${file.name}" 읽기 오류: ${err.message}`);
+          }
+          loaded++;
+          if (loaded === validFiles.length) onAllFilesLoaded();
+        };
+        reader.readAsArrayBuffer(file);
       }
-    };
-    reader.readAsArrayBuffer(file);
+    });
   }
 
-  // ── STEP 2: Sheet Selection ────────────────────────────────────────────────
-  function buildSheetStep() {
-    const grid = document.getElementById('sheetGrid');
-    grid.innerHTML = '';
-    state.selectedSheets = [];
-    state.allSheets.forEach(name => {
-      const chip = document.createElement('div');
-      chip.className = 'sheet-chip';
-      chip.textContent = name;
-      chip.addEventListener('click', () => {
-        chip.classList.toggle('selected');
-        if (chip.classList.contains('selected')) {
-          state.selectedSheets.push(name);
-        } else {
-          state.selectedSheets = state.selectedSheets.filter(s => s !== name);
-        }
-        document.getElementById('btnSheetNext').disabled = state.selectedSheets.length === 0;
-      });
-      grid.appendChild(chip);
-    });
-    document.getElementById('btnSheetNext').disabled = true;
+  function onAllFilesLoaded() {
+    rebuildAllSheets();
+
+    // If total sheets across all files is exactly 1, skip sheet selection
+    if (state.allSheets.length === 1) {
+      const only = state.allSheets[0];
+      state.selectedKeys = [only.key];
+      state.headerRows[only.key] = 1;
+      buildHeaderRowStep();
+      showSection('sec-header');
+      updateStepIndicator(3);
+    } else {
+      buildFileBar();
+      buildSheetStep();
+      showSection('sec-sheets');
+      updateStepIndicator(2);
+    }
   }
+
+  // ── STEP 2: Sheet Selection (XSS-safe DOM construction) ────────────────────
+  function buildSheetStep() {
+    const container = document.getElementById('sheetGroups');
+    container.innerHTML = '';
+    state.selectedKeys = [];
+    document.getElementById('btnSheetNext').disabled = true;
+
+    const multiFile = state.files.length > 1;
+
+    // Group sheets by file
+    const groups = state.files.map((f, fileIdx) => ({
+      fileName: f.fileName,
+      sheets: state.allSheets.filter(s => s.fileIdx === fileIdx),
+    }));
+
+    groups.forEach(group => {
+      const groupEl = el('div', 'sheet-group');
+
+      if (multiFile) {
+        const title = el('div', 'sheet-group-title');
+        title.textContent = group.fileName;
+        groupEl.appendChild(title);
+      }
+
+      const grid = el('div', 'sheet-grid');
+      group.sheets.forEach(sheetInfo => {
+        const chip = el('div', 'sheet-chip');
+        chip.textContent = sheetInfo.sheetName;
+        chip.addEventListener('click', () => {
+          chip.classList.toggle('selected');
+          if (chip.classList.contains('selected')) {
+            state.selectedKeys.push(sheetInfo.key);
+          } else {
+            state.selectedKeys = state.selectedKeys.filter(k => k !== sheetInfo.key);
+          }
+          document.getElementById('btnSheetNext').disabled = state.selectedKeys.length === 0;
+        });
+        grid.appendChild(chip);
+      });
+
+      groupEl.appendChild(grid);
+      container.appendChild(groupEl);
+    });
+  }
+
+  document.getElementById('btnSheetBack').addEventListener('click', () => {
+    showSection('sec-upload');
+    updateStepIndicator(1);
+  });
 
   document.getElementById('btnSheetNext').addEventListener('click', () => {
-    // maintain order as in workbook
-    state.selectedSheets = state.allSheets.filter(s => state.selectedSheets.includes(s));
+    // Maintain workbook order
+    state.selectedKeys = state.allSheets
+      .map(s => s.key)
+      .filter(k => state.selectedKeys.includes(k));
     state.headerRows = {};
-    state.selectedSheets.forEach(s => { state.headerRows[s] = 1; });
+    state.selectedKeys.forEach(k => { state.headerRows[k] = 1; });
     buildHeaderRowStep();
     showSection('sec-header');
     updateStepIndicator(3);
   });
 
-  // ── STEP 3: Header Row ─────────────────────────────────────────────────────
+  // ── STEP 3: Header Row (XSS-safe DOM construction) ─────────────────────────
   function buildHeaderRowStep() {
     const list = document.getElementById('headerRowList');
     list.innerHTML = '';
-    state.selectedSheets.forEach(name => {
-      const item = document.createElement('div');
-      item.className = 'header-row-item';
-      item.innerHTML = `
-        <div class="sheet-name">📄 ${name}</div>
-        <div class="row-input-wrap">
-          <span>헤더 행:</span>
-          <input type="number" min="1" max="999" value="${state.headerRows[name] || 1}" data-sheet="${name}" />
-          <span>행</span>
-        </div>`;
+    const multiFile = state.files.length > 1;
+
+    state.selectedKeys.forEach(key => {
+      const sheetInfo = state.allSheets.find(s => s.key === key);
+      if (!sheetInfo) return;
+
+      const item = el('div', 'header-row-item');
+
+      const nameEl = el('div', 'sheet-name');
+      nameEl.textContent = '📄 ' + (multiFile
+        ? `${sheetInfo.fileName} / ${sheetInfo.sheetName}`
+        : sheetInfo.sheetName);
+
+      const wrap = el('div', 'row-input-wrap');
+      const labelBefore = el('span');
+      labelBefore.textContent = '헤더 행:';
+      const input = document.createElement('input');
+      input.type = 'number';
+      input.min = '1';
+      input.max = '999';
+      input.value = String(state.headerRows[key] || 1);
+      input.dataset.key = key;
+      const labelAfter = el('span');
+      labelAfter.textContent = '행';
+      wrap.append(labelBefore, input, labelAfter);
+
+      item.append(nameEl, wrap);
       list.appendChild(item);
     });
   }
@@ -706,41 +870,45 @@
   });
 
   document.getElementById('btnHeaderNext').addEventListener('click', () => {
-    // Save header row values
     document.querySelectorAll('#headerRowList input[type="number"]').forEach(inp => {
-      const sheetName = inp.dataset.sheet;
+      const key = inp.dataset.key;
       const val = parseInt(inp.value, 10);
-      state.headerRows[sheetName] = isNaN(val) || val < 1 ? 1 : val;
+      state.headerRows[key] = isNaN(val) || val < 1 ? 1 : val;
     });
     buildColumnStep();
     showSection('sec-columns');
     updateStepIndicator(4);
   });
 
-  // ── STEP 4: Column Selection ───────────────────────────────────────────────
+  // ── STEP 4: Column Selection (XSS-safe DOM construction) ───────────────────
   function buildColumnStep() {
     const container = document.getElementById('colSections');
     container.innerHTML = '';
     state.selectedCols = {};
+    const multiSection = state.selectedKeys.length > 1;
+    const multiFile = state.files.length > 1;
 
-    state.selectedSheets.forEach(name => {
-      const sheet = state.workbook.Sheets[name];
-      const cols = getColumnsFromSheet(sheet, state.headerRows[name]);
-      state.selectedCols[name] = [];
+    state.selectedKeys.forEach(key => {
+      const sheetInfo = state.allSheets.find(s => s.key === key);
+      if (!sheetInfo) return;
 
-      const section = document.createElement('div');
-      section.className = 'sheet-section';
+      const { fileIdx, sheetName } = sheetInfo;
+      const sheet = state.files[fileIdx].workbook.Sheets[sheetName];
+      const cols = getColumnsFromSheet(sheet, state.headerRows[key]);
+      state.selectedCols[key] = [];
 
-      const showTitle = state.selectedSheets.length > 1;
-      if (showTitle) {
-        const title = document.createElement('div');
-        title.className = 'sheet-section-title';
-        title.textContent = name;
+      const section = el('div', 'sheet-section');
+
+      if (multiSection) {
+        const title = el('div', 'sheet-section-title');
+        title.textContent = multiFile
+          ? `${sheetInfo.fileName} / ${sheetName}`
+          : sheetName;
         section.appendChild(title);
       }
 
       if (cols.length === 0) {
-        const empty = document.createElement('div');
+        const empty = el('div');
         empty.style.cssText = 'font-size:0.82rem;color:var(--text-muted);padding:8px 0;';
         empty.textContent = '지정한 행에서 컬럼을 찾을 수 없습니다.';
         section.appendChild(empty);
@@ -748,75 +916,74 @@
         return;
       }
 
-      const grid = document.createElement('div');
-      grid.className = 'col-grid';
-
+      const grid = el('div', 'col-grid');
       cols.forEach(col => {
-        const card = document.createElement('div');
-        card.className = 'col-card';
-        card.dataset.sheet = name;
+        const card = el('div', 'col-card');
+        card.dataset.key = key;
         card.dataset.letter = col.letter;
-        card.dataset.name = col.name;
-        card.innerHTML = `
-          <div class="col-letter">${col.letter}열</div>
-          <div class="col-name">${col.name}</div>`;
-        card.addEventListener('click', () => toggleColCard(card, name, col));
+        card.dataset.colName = col.name;
+
+        const letterEl = el('div', 'col-letter');
+        letterEl.textContent = col.letter + '열';
+        const nameEl = el('div', 'col-name');
+        nameEl.textContent = col.name;
+        card.append(letterEl, nameEl);
+
+        card.addEventListener('click', () => toggleColCard(card, key, col));
         grid.appendChild(card);
       });
 
-      section.appendChild(grid);
+      section.append(grid);
       container.appendChild(section);
     });
 
     updateSelCount();
     document.getElementById('btnColNext').disabled = true;
-
-    // Select All toggle state
     document.getElementById('btnSelectAll').textContent = '전체 선택';
     document.getElementById('btnSelectAll')._allSelected = false;
   }
 
-  function toggleColCard(card, sheetName, col) {
+  function toggleColCard(card, key, col) {
     card.classList.toggle('selected');
     if (card.classList.contains('selected')) {
-      if (!state.selectedCols[sheetName]) state.selectedCols[sheetName] = [];
-      state.selectedCols[sheetName].push(col);
+      if (!state.selectedCols[key]) state.selectedCols[key] = [];
+      state.selectedCols[key].push(col);
     } else {
-      state.selectedCols[sheetName] = state.selectedCols[sheetName].filter(c => c.letter !== col.letter);
+      state.selectedCols[key] = state.selectedCols[key].filter(c => c.letter !== col.letter);
     }
     updateSelCount();
-    const totalSel = Object.values(state.selectedCols).flat().length;
-    document.getElementById('btnColNext').disabled = totalSel === 0;
+    document.getElementById('btnColNext').disabled = totalSelected() === 0;
+  }
+
+  function totalSelected() {
+    return Object.values(state.selectedCols).flat().length;
   }
 
   function updateSelCount() {
-    const total = Object.values(state.selectedCols).flat().length;
-    document.getElementById('selCount').textContent = total;
+    document.getElementById('selCount').textContent = totalSelected();
   }
 
   document.getElementById('btnSelectAll').addEventListener('click', function() {
     const cards = document.querySelectorAll('#colSections .col-card');
     const allSelected = this._allSelected;
 
-    // Reset
-    state.selectedSheets.forEach(name => { state.selectedCols[name] = []; });
+    state.selectedKeys.forEach(k => { state.selectedCols[k] = []; });
 
     cards.forEach(card => {
       if (allSelected) {
         card.classList.remove('selected');
       } else {
         card.classList.add('selected');
-        const name = card.dataset.sheet;
-        if (!state.selectedCols[name]) state.selectedCols[name] = [];
-        state.selectedCols[name].push({ letter: card.dataset.letter, name: card.dataset.name });
+        const k = card.dataset.key;
+        if (!state.selectedCols[k]) state.selectedCols[k] = [];
+        state.selectedCols[k].push({ letter: card.dataset.letter, name: card.dataset.colName });
       }
     });
 
     this._allSelected = !allSelected;
     this.textContent = !allSelected ? '전체 해제' : '전체 선택';
     updateSelCount();
-    const totalSel = Object.values(state.selectedCols).flat().length;
-    document.getElementById('btnColNext').disabled = totalSel === 0;
+    document.getElementById('btnColNext').disabled = totalSelected() === 0;
   });
 
   document.getElementById('btnColBack').addEventListener('click', () => {
@@ -833,17 +1000,24 @@
   // ── STEP 5: Copy ───────────────────────────────────────────────────────────
   function buildCopyStep() {
     const lines = [];
-    const multiSheet = state.selectedSheets.filter(s => (state.selectedCols[s] || []).length > 0).length > 1;
+    const activeKeys = state.selectedKeys.filter(k => (state.selectedCols[k] || []).length > 0);
+    const multiSection = activeKeys.length > 1;
+    const multiFile = state.files.length > 1;
 
-    state.selectedSheets.forEach(name => {
-      const cols = state.selectedCols[name] || [];
+    activeKeys.forEach(key => {
+      const cols = state.selectedCols[key] || [];
       if (cols.length === 0) return;
-      if (multiSheet) lines.push(`[${name}]`);
+      if (multiSection) {
+        const sheetInfo = state.allSheets.find(s => s.key === key);
+        const label = multiFile
+          ? `[${sheetInfo.fileName} / ${sheetInfo.sheetName}]`
+          : `[${sheetInfo.sheetName}]`;
+        lines.push(label);
+      }
       cols.forEach(col => lines.push(`${col.letter}열: ${col.name}`));
-      if (multiSheet) lines.push('');
+      if (multiSection) lines.push('');
     });
 
-    // Remove trailing blank line
     while (lines.length && lines[lines.length - 1] === '') lines.pop();
 
     const text = lines.join('\n');
@@ -870,7 +1044,7 @@
       await navigator.clipboard.writeText(text);
       showToast('✓ 클립보드에 복사되었습니다!');
     } catch {
-      // Fallback
+      // Fallback for browsers without Clipboard API
       const ta = document.createElement('textarea');
       ta.value = text;
       ta.style.cssText = 'position:fixed;top:-9999px;left:-9999px;';
