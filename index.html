@@ -1577,20 +1577,22 @@
     lines.push('## 데이터 구조');
     lines.push('');
 
+    // Build alias map: T1, T2, ... (only meaningful for multi-sheet)
+    const aliasMap = {};
+    if (multiSheet) {
+      activeKeys.forEach((key, i) => { aliasMap[key] = `T${i + 1}`; });
+    }
+
     // Find common columns among selected columns
     if (multiSheet) {
       const nameToTables = new Map();
       activeKeys.forEach(key => {
         const cols = state.selectedCols[key] || [];
-        const sheetInfo = state.allSheets.find(s => s.key === key);
-        const tableName = multiSheet && state.files.length > 1
-          ? `${sheetInfo.fileName}/${sheetInfo.sheetName}`
-          : (multiSheet ? sheetInfo.sheetName : sheetInfo.fileName);
         cols.forEach(col => {
           const norm = col.name.trim().toLowerCase();
           if (!nameToTables.has(norm)) nameToTables.set(norm, { original: col.name, tables: [] });
           const entry = nameToTables.get(norm);
-          entry.tables.push(tableName);
+          entry.tables.push({ alias: aliasMap[key], letter: col.letter });
         });
       });
 
@@ -1607,37 +1609,58 @@
         lines.push('| 컬럼명 | 포함 테이블 |');
         lines.push('|--------|------------|');
         commonEntries.forEach(entry => {
-          lines.push(`| ${escMd(entry.original)} | ${entry.tables.map(escMd).join(', ')} |`);
+          const tableStr = entry.tables.map(t => `${t.alias} (${t.letter}열)`).join(', ');
+          lines.push(`| ${escMd(entry.original)} | ${tableStr} |`);
         });
         lines.push('');
       }
     }
 
     // Table list
-    lines.push('### 테이블 목록');
-    lines.push('| 파일 | 시트 | 컬럼 수 |');
-    lines.push('|------|------|---------|');
-    activeKeys.forEach(key => {
-      const cols = state.selectedCols[key] || [];
-      const sheetInfo = state.allSheets.find(s => s.key === key);
-      const sheetLabel = sheetInfo.fileName.toLowerCase().endsWith('.csv') ? '—' : sheetInfo.sheetName;
-      lines.push(`| ${escMd(sheetInfo.fileName)} | ${escMd(sheetLabel)} | ${cols.length} |`);
-    });
+    if (multiSheet) {
+      lines.push('### 테이블 목록');
+      lines.push('| 별칭 | 파일 | 시트 | 전체 컬럼 수 |');
+      lines.push('|------|------|------|-------------|');
+      activeKeys.forEach(key => {
+        const sheetInfo = state.allSheets.find(s => s.key === key);
+        const sheetLabel = sheetInfo.fileName.toLowerCase().endsWith('.csv') ? '—' : sheetInfo.sheetName;
+        const wb = state.files[sheetInfo.fileIdx].workbook;
+        const sheet = wb.Sheets[sheetInfo.sheetName];
+        const allCols = getColumnsFromSheet(sheet, state.headerRows[key] || 1);
+        lines.push(`| ${aliasMap[key]} | ${escMd(sheetInfo.fileName)} | ${escMd(sheetLabel)} | ${allCols.length} |`);
+      });
+    } else {
+      lines.push('### 테이블 목록');
+      lines.push('| 파일 | 시트 | 전체 컬럼 수 |');
+      lines.push('|------|------|-------------|');
+      activeKeys.forEach(key => {
+        const sheetInfo = state.allSheets.find(s => s.key === key);
+        const sheetLabel = sheetInfo.fileName.toLowerCase().endsWith('.csv') ? '—' : sheetInfo.sheetName;
+        const wb = state.files[sheetInfo.fileIdx].workbook;
+        const sheet = wb.Sheets[sheetInfo.sheetName];
+        const allCols = getColumnsFromSheet(sheet, state.headerRows[key] || 1);
+        lines.push(`| ${escMd(sheetInfo.fileName)} | ${escMd(sheetLabel)} | ${allCols.length} |`);
+      });
+    }
     lines.push('');
 
-    // Column details per table
-    lines.push('### 컬럼 상세');
+    // Analysis columns per table
+    lines.push('### 분석 필요 컬럼');
     activeKeys.forEach(key => {
       const cols = state.selectedCols[key] || [];
       if (cols.length === 0) return;
       const sheetInfo = state.allSheets.find(s => s.key === key);
-      const label = multiSheet
-        ? (state.files.length > 1
-          ? `**${sheetInfo.fileName} / ${sheetInfo.sheetName}**`
-          : `**${sheetInfo.sheetName}**`)
-        : `**${sheetInfo.fileName}**`;
+      let label;
+      if (multiSheet) {
+        const fileSheetPart = state.files.length > 1
+          ? `${sheetInfo.fileName} / ${sheetInfo.sheetName}`
+          : sheetInfo.sheetName;
+        label = `**${aliasMap[key]} (${fileSheetPart})**`;
+      } else {
+        label = `**${sheetInfo.fileName}**`;
+      }
       lines.push(label);
-      lines.push(cols.map(c => '`' + c.name + '`').join(', '));
+      lines.push(cols.map(c => '`' + c.letter + '열: ' + c.name + '`').join(', '));
       lines.push('');
     });
 
