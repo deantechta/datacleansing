@@ -303,6 +303,27 @@
       position: relative;
     }
     .col-card:hover { border-color: var(--accent); transform: translateY(-1px); }
+    .col-copy-btn {
+      position: absolute;
+      top: 4px;
+      right: 4px;
+      width: 22px;
+      height: 22px;
+      border: none;
+      background: transparent;
+      cursor: pointer;
+      font-size: 0.7rem;
+      color: var(--muted);
+      border-radius: 4px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      opacity: 0;
+      transition: opacity 0.15s, background 0.15s;
+      z-index: 2;
+    }
+    .col-card:hover .col-copy-btn { opacity: 1; }
+    .col-copy-btn:hover { background: var(--accent-dim); color: var(--accent); }
     .col-card.selected {
       border-color: var(--selected);
       background: var(--selected-bg);
@@ -1384,7 +1405,19 @@
         } else {
           tooltip.textContent = '(데이터 없음)';
         }
-        card.append(letterEl, nameEl, tooltip);
+        // Clipboard copy button
+        const copyBtn = el('button', 'col-copy-btn');
+        copyBtn.textContent = '📋';
+        copyBtn.title = '클립보드에 복사';
+        copyBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const copyText = col.letter + '열 ' + col.name;
+          navigator.clipboard.writeText(copyText).then(() => {
+            showToast('📋 복사됨: ' + copyText);
+          }).catch(() => {});
+        });
+
+        card.append(copyBtn, letterEl, nameEl, tooltip);
 
         card.addEventListener('click', () => toggleColCard(card, key, col));
         grid.appendChild(card);
