@@ -518,6 +518,38 @@
     }
     .col-card:hover .col-tooltip { display: block; }
 
+    /* COMMON COLUMN BADGE */
+    .common-badge {
+      font-size: 0.62rem;
+      font-weight: 600;
+      color: var(--success);
+      background: var(--success-bg);
+      padding: 1px 6px;
+      border-radius: 4px;
+      white-space: nowrap;
+    }
+    .common-select-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 14px;
+      padding: 10px 14px;
+      background: var(--success-bg);
+      border: 1px solid rgba(52,211,153,0.25);
+      border-radius: var(--radius-sm);
+    }
+    .common-select-row .common-label {
+      font-size: 0.82rem;
+      color: var(--success);
+      font-weight: 600;
+    }
+    .common-select-row .common-count {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      margin-left: 8px;
+      font-weight: 400;
+    }
+
     /* INLINE ERROR */
     .error-inline {
       background: rgba(248,113,113,0.1);
@@ -687,7 +719,10 @@
     </div>
     <div class="select-all-row">
       <div class="count-badge">선택됨: <span id="selCount">0</span>개</div>
-      <button class="btn btn-secondary" id="btnSelectAll" style="padding:6px 14px; font-size:0.8rem;">전체 선택</button>
+      <div style="display:flex;gap:8px;">
+        <button class="btn btn-secondary" id="btnSelectCommon" style="padding:6px 14px; font-size:0.8rem; display:none;">공통 컬럼 일괄 선택</button>
+        <button class="btn btn-secondary" id="btnSelectAll" style="padding:6px 14px; font-size:0.8rem;">전체 선택</button>
+      </div>
     </div>
     <div id="colSections"></div>
     <div class="btn-row">
@@ -705,6 +740,7 @@
       <label><input type="radio" name="fmt" value="tab" checked /> 탭 (Excel 붙여넣기)</label>
       <label><input type="radio" name="fmt" value="csv" /> 쉼표 (CSV)</label>
       <label><input type="radio" name="fmt" value="newline" /> 줄바꿈만</label>
+      <label><input type="radio" name="fmt" value="llm" /> LLM 마크다운</label>
       <div class="format-divider"></div>
       <label><input type="checkbox" id="fmtHeader" checked /> 헤더(컬럼명) 포함</label>
     </div>
@@ -1241,6 +1277,25 @@
   });
 
   // ── STEP 4: Column Selection (XSS-safe DOM construction) ───────────────────
+
+  // Find columns that appear in 2+ sheets (by normalized name)
+  function findCommonColumns(allColsByKey) {
+    const nameToKeys = new Map(); // normalized name → Set of sheet keys
+    for (const [key, cols] of Object.entries(allColsByKey)) {
+      cols.forEach(col => {
+        const norm = col.name.trim().toLowerCase();
+        if (!nameToKeys.has(norm)) nameToKeys.set(norm, new Set());
+        nameToKeys.get(norm).add(key);
+      });
+    }
+    // Keep only names appearing in 2+ sheets
+    const common = new Map();
+    for (const [norm, keys] of nameToKeys) {
+      if (keys.size >= 2) common.set(norm, keys);
+    }
+    return common; // Map<normalizedName, Set<sheetKey>>
+  }
+
   function buildColumnStep() {
     const container = document.getElementById('colSections');
     container.innerHTML = '';
@@ -1248,13 +1303,35 @@
     const multiSection = state.selectedKeys.length > 1;
     const multiFile = state.files.length > 1;
 
+    // First pass: extract all columns per sheet for common detection
+    const allColsByKey = {};
+    state.selectedKeys.forEach(key => {
+      const sheetInfo = state.allSheets.find(s => s.key === key);
+      if (!sheetInfo) return;
+      const sheet = state.files[sheetInfo.fileIdx].workbook.Sheets[sheetInfo.sheetName];
+      allColsByKey[key] = getColumnsFromSheet(sheet, state.headerRows[key]);
+    });
+
+    const commonCols = multiSection ? findCommonColumns(allColsByKey) : new Map();
+
+    // Show/hide common column select button
+    const btnCommon = document.getElementById('btnSelectCommon');
+    if (commonCols.size > 0) {
+      btnCommon.style.display = '';
+      btnCommon.textContent = `공통 컬럼 일괄 선택 (${commonCols.size})`;
+      btnCommon._commonCols = commonCols;
+      btnCommon._allSelected = false;
+    } else {
+      btnCommon.style.display = 'none';
+    }
+
     state.selectedKeys.forEach(key => {
       const sheetInfo = state.allSheets.find(s => s.key === key);
       if (!sheetInfo) return;
 
       const { fileIdx, sheetName } = sheetInfo;
       const sheet = state.files[fileIdx].workbook.Sheets[sheetName];
-      const cols = getColumnsFromSheet(sheet, state.headerRows[key]);
+      const cols = allColsByKey[key] || [];
       state.selectedCols[key] = [];
 
       const section = el('div', 'sheet-section');
@@ -1287,6 +1364,17 @@
         letterEl.textContent = col.letter + '열';
         const nameEl = el('div', 'col-name');
         nameEl.textContent = col.name;
+
+        // Common column badge
+        const norm = col.name.trim().toLowerCase();
+        if (commonCols.has(norm)) {
+          card.dataset.common = 'true';
+          const badge = el('div', 'common-badge');
+          const count = commonCols.get(norm).size;
+          const total = state.selectedKeys.length;
+          badge.textContent = `공통 ${count}/${total}`;
+          card.appendChild(badge);
+        }
 
         // Tooltip: preview first 5 data values
         const tooltip = el('div', 'col-tooltip');
@@ -1341,6 +1429,40 @@
       const letter = (card.dataset.letter || '').toLowerCase();
       card.style.display = (query === '' || name.includes(query) || letter.includes(query)) ? '' : 'none';
     });
+  });
+
+  // Common column bulk select
+  document.getElementById('btnSelectCommon').addEventListener('click', function() {
+    const commonCols = this._commonCols;
+    if (!commonCols || commonCols.size === 0) return;
+    const allSelected = this._allSelected;
+    const allCards = document.querySelectorAll('#colSections .col-card');
+
+    allCards.forEach(card => {
+      if (card.dataset.common !== 'true') return;
+      if (allSelected) {
+        card.classList.remove('selected');
+      } else {
+        card.classList.add('selected');
+      }
+    });
+
+    // Rebuild selectedCols from DOM state
+    state.selectedKeys.forEach(k => { state.selectedCols[k] = []; });
+    allCards.forEach(card => {
+      if (card.classList.contains('selected')) {
+        const k = card.dataset.key;
+        if (!state.selectedCols[k]) state.selectedCols[k] = [];
+        state.selectedCols[k].push({ letter: card.dataset.letter, name: card.dataset.colName });
+      }
+    });
+
+    this._allSelected = !allSelected;
+    this.textContent = !allSelected
+      ? `공통 컬럼 일괄 해제 (${commonCols.size})`
+      : `공통 컬럼 일괄 선택 (${commonCols.size})`;
+    updateSelCount();
+    document.getElementById('btnColNext').disabled = totalSelected() === 0;
   });
 
   document.getElementById('btnSelectAll').addEventListener('click', function() {
@@ -1399,6 +1521,11 @@
     const activeKeys = state.selectedKeys.filter(k => (state.selectedCols[k] || []).length > 0);
     const multiSheet = activeKeys.length > 1;
 
+    // LLM Markdown format
+    if (fmt === 'llm') {
+      return buildLLMMarkdown(activeKeys, multiSheet);
+    }
+
     let separator;
     if (fmt === 'tab') separator = '\t';
     else if (fmt === 'csv') separator = ',';
@@ -1443,6 +1570,81 @@
     return lines.join('\n');
   }
 
+  function escMd(str) { return str.replace(/\|/g, '\\|'); }
+
+  function buildLLMMarkdown(activeKeys, multiSheet) {
+    const lines = [];
+    lines.push('## 데이터 구조');
+    lines.push('');
+
+    // Find common columns among selected columns
+    if (multiSheet) {
+      const nameToTables = new Map();
+      activeKeys.forEach(key => {
+        const cols = state.selectedCols[key] || [];
+        const sheetInfo = state.allSheets.find(s => s.key === key);
+        const tableName = multiSheet && state.files.length > 1
+          ? `${sheetInfo.fileName}/${sheetInfo.sheetName}`
+          : (multiSheet ? sheetInfo.sheetName : sheetInfo.fileName);
+        cols.forEach(col => {
+          const norm = col.name.trim().toLowerCase();
+          if (!nameToTables.has(norm)) nameToTables.set(norm, { original: col.name, tables: [] });
+          const entry = nameToTables.get(norm);
+          entry.tables.push(tableName);
+        });
+      });
+
+      // Common = appears in 2+ tables
+      const commonEntries = [];
+      for (const [norm, info] of nameToTables) {
+        if (info.tables.length >= 2) {
+          commonEntries.push(info);
+        }
+      }
+
+      if (commonEntries.length > 0) {
+        lines.push('### 공통 컬럼 (분석 기준 Key)');
+        lines.push('| 컬럼명 | 포함 테이블 |');
+        lines.push('|--------|------------|');
+        commonEntries.forEach(entry => {
+          lines.push(`| ${escMd(entry.original)} | ${entry.tables.map(escMd).join(', ')} |`);
+        });
+        lines.push('');
+      }
+    }
+
+    // Table list
+    lines.push('### 테이블 목록');
+    lines.push('| 파일 | 시트 | 컬럼 수 |');
+    lines.push('|------|------|---------|');
+    activeKeys.forEach(key => {
+      const cols = state.selectedCols[key] || [];
+      const sheetInfo = state.allSheets.find(s => s.key === key);
+      const sheetLabel = sheetInfo.fileName.toLowerCase().endsWith('.csv') ? '—' : sheetInfo.sheetName;
+      lines.push(`| ${escMd(sheetInfo.fileName)} | ${escMd(sheetLabel)} | ${cols.length} |`);
+    });
+    lines.push('');
+
+    // Column details per table
+    lines.push('### 컬럼 상세');
+    activeKeys.forEach(key => {
+      const cols = state.selectedCols[key] || [];
+      if (cols.length === 0) return;
+      const sheetInfo = state.allSheets.find(s => s.key === key);
+      const label = multiSheet
+        ? (state.files.length > 1
+          ? `**${sheetInfo.fileName} / ${sheetInfo.sheetName}**`
+          : `**${sheetInfo.sheetName}**`)
+        : `**${sheetInfo.fileName}**`;
+      lines.push(label);
+      lines.push(cols.map(c => '`' + c.name + '`').join(', '));
+      lines.push('');
+    });
+
+    while (lines.length && lines[lines.length - 1] === '') lines.pop();
+    return lines.join('\n');
+  }
+
   function buildCopyStep() {
     const text = buildFormattedText();
     const box = document.getElementById('previewBox');
@@ -1458,7 +1660,19 @@
 
   // Re-render preview when format options change
   document.querySelectorAll('input[name="fmt"]').forEach(r => {
-    r.addEventListener('change', buildCopyStep);
+    r.addEventListener('change', () => {
+      // Disable fmtHeader checkbox when LLM format is selected (always full output)
+      const isLLM = document.querySelector('input[name="fmt"]:checked').value === 'llm';
+      const fmtHeader = document.getElementById('fmtHeader');
+      fmtHeader.disabled = isLLM;
+      if (isLLM) {
+        fmtHeader.checked = true;
+        fmtHeader.parentElement.style.opacity = '0.4';
+      } else {
+        fmtHeader.parentElement.style.opacity = '';
+      }
+      buildCopyStep();
+    });
   });
   document.getElementById('fmtHeader').addEventListener('change', buildCopyStep);
 
