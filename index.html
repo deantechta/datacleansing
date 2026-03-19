@@ -307,12 +307,11 @@
       position: absolute;
       top: 4px;
       right: 4px;
-      width: 22px;
-      height: 22px;
       border: none;
       background: transparent;
       cursor: pointer;
-      font-size: 0.7rem;
+      padding: 1px 5px;
+      font-size: 0.6rem;
       color: var(--muted);
       border-radius: 4px;
       display: flex;
@@ -1407,13 +1406,13 @@
         }
         // Clipboard copy button
         const copyBtn = el('button', 'col-copy-btn');
-        copyBtn.textContent = '📋';
+        copyBtn.textContent = 'copy';
         copyBtn.title = '클립보드에 복사';
         copyBtn.addEventListener('click', (e) => {
           e.stopPropagation();
           const copyText = col.letter + '열 ' + col.name;
           navigator.clipboard.writeText(copyText).then(() => {
-            showToast('📋 복사됨: ' + copyText);
+            showToast('복사됨: ' + copyText);
           }).catch(() => {});
         });
 
