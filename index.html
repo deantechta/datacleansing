@@ -1406,6 +1406,11 @@
     if (card.classList.contains('selected')) {
       if (!state.selectedCols[key]) state.selectedCols[key] = [];
       state.selectedCols[key].push(col);
+      // Copy card text to clipboard on selection
+      const copyText = col.letter + '열 ' + col.name;
+      navigator.clipboard.writeText(copyText).then(() => {
+        showToast('📋 복사됨: ' + copyText);
+      }).catch(() => {});
     } else {
       state.selectedCols[key] = state.selectedCols[key].filter(c => c.letter !== col.letter);
     }
