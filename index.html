@@ -345,6 +345,72 @@
       line-height: 1.3;
     }
 
+    /* ANALYSIS PROMPT */
+    .prompt-section {
+      margin-bottom: 16px;
+    }
+    .prompt-section label {
+      display: block;
+      font-size: 0.82rem;
+      font-weight: 600;
+      margin-bottom: 6px;
+      color: var(--text);
+    }
+    .prompt-textarea {
+      width: 100%;
+      min-height: 80px;
+      padding: 10px 14px;
+      border: 1.5px solid var(--border);
+      border-radius: var(--radius-sm);
+      background: var(--surface2);
+      color: var(--text);
+      font-size: 0.82rem;
+      font-family: inherit;
+      line-height: 1.6;
+      resize: vertical;
+      box-sizing: border-box;
+    }
+    .prompt-textarea:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
+    .prompt-textarea::placeholder {
+      color: var(--text-muted);
+    }
+    .chip-bar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 8px;
+    }
+    .chip-bar-label {
+      font-size: 0.72rem;
+      color: var(--text-muted);
+      width: 100%;
+      margin-bottom: 2px;
+    }
+    .col-chip {
+      display: inline-flex;
+      align-items: center;
+      padding: 3px 10px;
+      font-size: 0.72rem;
+      font-weight: 500;
+      background: var(--accent-dim);
+      color: var(--accent);
+      border: 1px solid transparent;
+      border-radius: 12px;
+      cursor: pointer;
+      transition: all 0.15s;
+      user-select: none;
+    }
+    .col-chip:hover {
+      background: var(--accent);
+      color: #fff;
+    }
+    .col-chip:active {
+      transform: scale(0.95);
+    }
+
     /* PREVIEW */
     .preview-box {
       background: var(--bg);
@@ -753,8 +819,13 @@
 
   <!-- STEP 5: COPY -->
   <div class="card section" id="sec-copy">
-    <div class="card-title">복사 확인</div>
-    <div class="card-desc">출력 형식을 선택한 뒤, 클립보드에 복사하세요.</div>
+    <div class="card-title">결과 및 프롬프트</div>
+    <div class="card-desc">분석 요청사항을 작성하고, 컬럼 칩을 클릭하면 텍스트에 삽입됩니다.</div>
+    <div class="prompt-section">
+      <label>분석 요청사항</label>
+      <textarea class="prompt-textarea" id="promptTextarea" placeholder="예: 다음 데이터에서 중복된 행을 찾아주세요..."></textarea>
+      <div class="chip-bar" id="chipBar"></div>
+    </div>
     <div class="format-options">
       <span class="format-group-title">클립보드 구분자</span>
       <label><input type="radio" name="fmt" value="tab" checked /> 탭 (Excel 붙여넣기)</label>
@@ -1042,6 +1113,8 @@
     previewBox.innerHTML = '';
     previewBox._copyText = null;
     document.getElementById('fileInput').value = '';
+    document.getElementById('promptTextarea').value = '';
+    document.getElementById('chipBar').innerHTML = '';
     showUploadError('');
     showSection('sec-upload');
     updateStepIndicator(1);
@@ -1604,36 +1677,36 @@
 
   function escMd(str) { return str.replace(/\|/g, '\\|'); }
 
+  function getSheetLabel(sheetInfo) {
+    const isCsv = sheetInfo.fileName.toLowerCase().endsWith('.csv');
+    if (isCsv) return sheetInfo.fileName;
+    return state.files.length > 1
+      ? `${sheetInfo.fileName} / ${sheetInfo.sheetName}`
+      : sheetInfo.sheetName || sheetInfo.fileName;
+  }
+
   function buildLLMMarkdown(activeKeys, multiSheet) {
     const lines = [];
     lines.push('## 데이터 구조');
     lines.push('');
 
-    // Build alias map: T1, T2, ... (only meaningful for multi-sheet)
-    const aliasMap = {};
-    if (multiSheet) {
-      activeKeys.forEach((key, i) => { aliasMap[key] = `T${i + 1}`; });
-    }
-
     // Find common columns among selected columns
     if (multiSheet) {
       const nameToTables = new Map();
       activeKeys.forEach(key => {
+        const sheetInfo = state.allSheets.find(s => s.key === key);
         const cols = state.selectedCols[key] || [];
         cols.forEach(col => {
           const norm = col.name.trim().toLowerCase();
           if (!nameToTables.has(norm)) nameToTables.set(norm, { original: col.name, tables: [] });
           const entry = nameToTables.get(norm);
-          entry.tables.push({ alias: aliasMap[key], letter: col.letter });
+          entry.tables.push({ label: getSheetLabel(sheetInfo), letter: col.letter });
         });
       });
 
-      // Common = appears in 2+ tables
       const commonEntries = [];
       for (const [norm, info] of nameToTables) {
-        if (info.tables.length >= 2) {
-          commonEntries.push(info);
-        }
+        if (info.tables.length >= 2) commonEntries.push(info);
       }
 
       if (commonEntries.length > 0) {
@@ -1641,7 +1714,7 @@
         lines.push('| 컬럼명 | 포함 테이블 |');
         lines.push('|--------|------------|');
         commonEntries.forEach(entry => {
-          const tableStr = entry.tables.map(t => `${t.alias} (${t.letter}열)`).join(', ');
+          const tableStr = entry.tables.map(t => `${escMd(t.label)} (${t.letter}열)`).join(', ');
           lines.push(`| ${escMd(entry.original)} | ${tableStr} |`);
         });
         lines.push('');
@@ -1649,31 +1722,18 @@
     }
 
     // Table list
-    if (multiSheet) {
-      lines.push('### 테이블 목록');
-      lines.push('| 별칭 | 파일 | 시트 | 전체 컬럼 수 |');
-      lines.push('|------|------|------|-------------|');
-      activeKeys.forEach(key => {
-        const sheetInfo = state.allSheets.find(s => s.key === key);
-        const sheetLabel = sheetInfo.fileName.toLowerCase().endsWith('.csv') ? '—' : sheetInfo.sheetName;
-        const wb = state.files[sheetInfo.fileIdx].workbook;
-        const sheet = wb.Sheets[sheetInfo.sheetName];
-        const allCols = getColumnsFromSheet(sheet, state.headerRows[key] || 1);
-        lines.push(`| ${aliasMap[key]} | ${escMd(sheetInfo.fileName)} | ${escMd(sheetLabel)} | ${allCols.length} |`);
-      });
-    } else {
-      lines.push('### 테이블 목록');
-      lines.push('| 파일 | 시트 | 전체 컬럼 수 |');
-      lines.push('|------|------|-------------|');
-      activeKeys.forEach(key => {
-        const sheetInfo = state.allSheets.find(s => s.key === key);
-        const sheetLabel = sheetInfo.fileName.toLowerCase().endsWith('.csv') ? '—' : sheetInfo.sheetName;
-        const wb = state.files[sheetInfo.fileIdx].workbook;
-        const sheet = wb.Sheets[sheetInfo.sheetName];
-        const allCols = getColumnsFromSheet(sheet, state.headerRows[key] || 1);
-        lines.push(`| ${escMd(sheetInfo.fileName)} | ${escMd(sheetLabel)} | ${allCols.length} |`);
-      });
-    }
+    lines.push('### 테이블 목록');
+    lines.push('| 파일명 | 시트 | 전체 컬럼 수 |');
+    lines.push('|--------|------|-------------|');
+    activeKeys.forEach(key => {
+      const sheetInfo = state.allSheets.find(s => s.key === key);
+      const isCsv = sheetInfo.fileName.toLowerCase().endsWith('.csv');
+      const sheetCol = isCsv ? '—' : sheetInfo.sheetName;
+      const wb = state.files[sheetInfo.fileIdx].workbook;
+      const sheet = wb.Sheets[sheetInfo.sheetName];
+      const allCols = getColumnsFromSheet(sheet, state.headerRows[key] || 1);
+      lines.push(`| ${escMd(sheetInfo.fileName)} | ${escMd(sheetCol)} | ${allCols.length} |`);
+    });
     lines.push('');
 
     // Analysis columns per table
@@ -1682,16 +1742,7 @@
       const cols = state.selectedCols[key] || [];
       if (cols.length === 0) return;
       const sheetInfo = state.allSheets.find(s => s.key === key);
-      let label;
-      if (multiSheet) {
-        const fileSheetPart = state.files.length > 1
-          ? `${sheetInfo.fileName} / ${sheetInfo.sheetName}`
-          : sheetInfo.sheetName;
-        label = `**${aliasMap[key]} (${fileSheetPart})**`;
-      } else {
-        label = `**${sheetInfo.fileName}**`;
-      }
-      lines.push(label);
+      lines.push(`**${getSheetLabel(sheetInfo)}**`);
       lines.push(cols.map(c => '`' + c.letter + '열: ' + c.name + '`').join(', '));
       lines.push('');
     });
@@ -1711,6 +1762,47 @@
       box.classList.add('preview-empty');
     }
     box._copyText = text;
+
+    // Build column chips
+    buildChipBar();
+  }
+
+  function buildChipBar() {
+    const bar = document.getElementById('chipBar');
+    bar.innerHTML = '';
+    const activeKeys = state.selectedKeys.filter(k => (state.selectedCols[k] || []).length > 0);
+    if (activeKeys.length === 0) return;
+
+    const label = document.createElement('div');
+    label.className = 'chip-bar-label';
+    label.textContent = '클릭하면 텍스트에 삽입됩니다';
+    bar.appendChild(label);
+
+    activeKeys.forEach(key => {
+      const cols = state.selectedCols[key] || [];
+      cols.forEach(col => {
+        const chip = document.createElement('span');
+        chip.className = 'col-chip';
+        chip.textContent = col.letter + '열: ' + col.name;
+        chip.addEventListener('click', () => insertChipToPrompt(col));
+        bar.appendChild(chip);
+      });
+    });
+  }
+
+  function insertChipToPrompt(col) {
+    const ta = document.getElementById('promptTextarea');
+    const text = '`' + col.letter + '열: ' + col.name + '`';
+    const start = ta.selectionStart;
+    const end = ta.selectionEnd;
+    const before = ta.value.substring(0, start);
+    const after = ta.value.substring(end);
+    // Add space before if needed
+    const needSpace = before.length > 0 && !before.endsWith(' ') && !before.endsWith('\n');
+    ta.value = before + (needSpace ? ' ' : '') + text + after;
+    const newPos = start + (needSpace ? 1 : 0) + text.length;
+    ta.selectionStart = ta.selectionEnd = newPos;
+    ta.focus();
   }
 
   // Re-render preview when format options change
@@ -1737,14 +1829,16 @@
   });
 
   document.getElementById('btnCopy').addEventListener('click', async () => {
-    const text = document.getElementById('previewBox')._copyText;
-    if (!text) return;
+    const dataText = document.getElementById('previewBox')._copyText;
+    if (!dataText) return;
+    const prompt = document.getElementById('promptTextarea').value.trim();
+    const finalText = prompt ? prompt + '\n\n' + dataText : dataText;
     try {
-      await navigator.clipboard.writeText(text);
+      await navigator.clipboard.writeText(finalText);
       showToast('✓ 클립보드에 복사되었습니다!');
     } catch {
       const ta = document.createElement('textarea');
-      ta.value = text;
+      ta.value = finalText;
       ta.style.cssText = 'position:fixed;top:-9999px;left:-9999px;';
       document.body.appendChild(ta);
       ta.select();
